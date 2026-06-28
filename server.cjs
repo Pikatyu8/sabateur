@@ -23,20 +23,21 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_express = __toESM(require("express"), 1);
-var import_fs = __toESM(require("fs"), 1);
 var import_http = __toESM(require("http"), 1);
 var import_path = __toESM(require("path"), 1);
+var import_fs = __toESM(require("fs"), 1);
 var import_vite = require("vite");
 var import_peer = require("peer");
 async function startServer() {
   const app = (0, import_express.default)();
   app.set("trust proxy", true);
   const server = import_http.default.createServer(app);
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   const peerServer = (0, import_peer.ExpressPeerServer)(server, {
     path: "/",
     allow_discovery: true,
     proxied: true
-    // 2. Указываем PeerJS, что мы работаем за реверс-прокси
+    // Включает корректную работу за реверс-прокси
   });
   peerServer.on("connection", (client) => {
     console.log(`Peer connected: ${client.getId()}`);
