@@ -23,6 +23,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_express = __toESM(require("express"), 1);
+var import_fs = __toESM(require("fs"), 1);
 var import_http = __toESM(require("http"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_vite = require("vite");
@@ -55,7 +56,12 @@ async function startServer() {
     const distPath = import_path.default.join(process.cwd(), "dist");
     app.use(import_express.default.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      const indexPath = import_path.default.join(distPath, "index.html");
+      if (import_fs.default.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.send("Saboteur PeerJS Server is running. Frontend is hosted on GitHub Pages.");
+      }
     });
   }
   server.listen(PORT, "0.0.0.0", () => {
