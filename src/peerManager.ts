@@ -89,7 +89,7 @@ const getPeerConfig = () => {
       ]
     }
   };
-
+}
 
 export const usePeerGame = () => {
   const [peer, setPeer] = useState<Peer | null>(null);
