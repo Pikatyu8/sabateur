@@ -75,13 +75,21 @@ const getPeerConfig = () => {
   // ВНИМАНИЕ: Замените "pikatyu8" на ваш юзернейм на Hugging Face, 
   // а "saboteur-backend" на точное имя созданного вами Space.
   return {
-    host: 'niksan0011-saboteur-backend.hf.space', // Адрес вашего Hugging Face Space
+    host: 'niksan0011-saboteur-backend.hf.space', 
     port: 443,
     secure: true,
     path: '/peerjs',
-    debug: 2,
+    debug: 3, // <-- ИЗМЕНИТЕ НА 3: PeerJS начнет выводить все этапы handshake в консоль браузера!
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' }
+      ]
+    }
   };
-};
+
 
 export const usePeerGame = () => {
   const [peer, setPeer] = useState<Peer | null>(null);
