@@ -1,25 +1,29 @@
 import express from 'express';
-import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { ExpressPeerServer } from 'peer';
 
 async function startServer() {
   const app = express();
   
-  // 1. Указываем Express доверять заголовкам прокси-сервера Hugging Face
-  app.set('trust proxy', true); 
-  
-  const server = http.createServer(app);
+  // Доверяем заголовкам прокси-сервера Hugging Face
+  app.set('trust proxy', true);
 
-  // Set up PeerJS server
+  const server = http.createServer(app);
+  
+  // Определяем порт (Hugging Face автоматически передает его в переменной процесса)
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  // Настройка PeerJS-сервера с поддержкой проксирования
   const peerServer = ExpressPeerServer(server, {
     path: '/',
     allow_discovery: true,
-    proxied: true, // 2. Указываем PeerJS, что мы работаем за реверс-прокси
+    proxied: true, // Включает корректную работу за реверс-прокси
   });
 
+  // Логирование подключений клиентов к сигнальному серверу
   peerServer.on('connection', (client) => {
     console.log(`Peer connected: ${client.getId()}`);
   });
@@ -35,7 +39,7 @@ async function startServer() {
     res.json({ status: 'ok' });
   });
 
-  // Vite middleware for development or static serving for production
+  // Раздача статического контента в зависимости от окружения
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -51,12 +55,13 @@ async function startServer() {
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
-        // Если фронтенд не скомпилирован в контейнере, отдаем простое текстовое сообщение
+        // Заглушка, если фронтенд развернут отдельно на GitHub Pages
         res.send('Saboteur PeerJS Server is running. Frontend is hosted on GitHub Pages.');
       }
     });
   }
 
+  // Запуск сервера на прослушивание порта
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
