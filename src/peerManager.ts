@@ -75,7 +75,7 @@ const getPeerConfig = () => {
   // ВНИМАНИЕ: Замените "pikatyu8" на ваш юзернейм на Hugging Face, 
   // а "saboteur-backend" на точное имя созданного вами Space.
   return {
-    host: 'pikatyu8-saboteur-backend.hf.space', // Адрес вашего Hugging Face Space
+    host: 'niksan0011-saboteur-backend.hf.space', // Адрес вашего Hugging Face Space
     port: 443,
     secure: true,
     path: '/peerjs',
