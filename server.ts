@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -42,7 +43,14 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        // Если фронтенд не скомпилирован в контейнере, отдаем простое текстовое сообщение
+        res.send('Saboteur PeerJS Server is running. Frontend is hosted on GitHub Pages.');
+      }
     });
   }
 
