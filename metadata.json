@@ -1,0 +1,6 @@
+{
+  "name": "Saboteur Multiplayer",
+  "description": "Мультиплеерный клон настольной игры 'Гномы-Вредители' (Saboteur) по WebRTC/PeerJS с защитой от читерства.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
