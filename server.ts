@@ -7,16 +7,19 @@ import { ExpressPeerServer } from 'peer';
 
 async function startServer() {
   const app = express();
+  
+  // 1. Указываем Express доверять заголовкам прокси-сервера Hugging Face
+  app.set('trust proxy', true); 
+  
   const server = http.createServer(app);
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Set up PeerJS server
   const peerServer = ExpressPeerServer(server, {
     path: '/',
     allow_discovery: true,
+    proxied: true, // 2. Указываем PeerJS, что мы работаем за реверс-прокси
   });
 
-  // Log connections
   peerServer.on('connection', (client) => {
     console.log(`Peer connected: ${client.getId()}`);
   });
