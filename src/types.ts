@@ -1,3 +1,4 @@
+// src/types.ts
 export type CardType = 'tunnel' | 'action';
 
 export interface TunnelCard {

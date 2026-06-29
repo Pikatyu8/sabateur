@@ -1,3 +1,4 @@
+// src/gameEngine.ts
 import { Card, TunnelCard, ActionCard, PlacedCard, Player, ToolType } from './types';
 
 // Helper to get opposing direction
