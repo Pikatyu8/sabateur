@@ -46,6 +46,42 @@ async function startServer() {
     console.log(`Peer disconnected: ${client.getId()}`);
   });
   app.use("/peerjs", peerServer);
+  app.get("/api/ice-servers", async (req, res) => {
+    try {
+      const ident = process.env.XIRSYS_IDENT;
+      const secret = process.env.XIRSYS_SECRET;
+      const channel = process.env.XIRSYS_CHANNEL;
+      if (!ident || !secret || !channel) {
+        console.warn("Xirsys environment variables are missing. Using fallback STUN servers.");
+        return res.json([
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" }
+        ]);
+      }
+      const auth = Buffer.from(`${ident}:${secret}`).toString("base64");
+      const response = await fetch(`https://global.xirsys.net/_turn/${channel}`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Basic ${auth}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ format: "urls" })
+      });
+      if (!response.ok) {
+        throw new Error(`Xirsys API returned status ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data.v.iceServers);
+    } catch (err) {
+      console.error("Failed to fetch Xirsys ICE servers:", err);
+      res.json([
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" }
+      ]);
+    }
+  });
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
