@@ -47,7 +47,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState<string>('');
   const [joinCode, setJoinCode] = useState<string>('');
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
-  const [scale, setScale] = useState<number>(0.6); // Default 60% scale to see more of the board
+  const [scale, setScale] = useState<number>(0.85); // Изменено с 0.6 до 0.85 для компактного отображения
   const [isRotated, setIsRotated] = useState<boolean>(false);
   const [chatInput, setChatInput] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'board' | 'players' | 'chat' | 'logs'>('board');
@@ -55,6 +55,24 @@ export default function App() {
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const boardContainerRef = useRef<HTMLDivElement>(null);
+
+  // Нативный некостыльный перехват события колесика мыши (onWheel с опцией passive: false)
+  // Это предотвращает физическую прокрутку страницы во время изменения масштаба поля
+  useEffect(() => {
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault(); // Нативно блокируем стандартный скролл
+      const zoomFactor = e.deltaY < 0 ? 0.05 : -0.05;
+      setScale(prev => Math.min(1.5, Math.max(0.15, prev + zoomFactor)));
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [gameState?.status, connectionStatus]); // Перезапускаем при изменении экранов игры
 
   // Auto scroll logs
   useEffect(() => {
@@ -114,10 +132,11 @@ export default function App() {
 
   // Board coordinate bound computation
   const getGridRange = (grid: Record<string, PlacedCard>) => {
-    let minX = -1;
-    let maxX = 9;
-    let minY = -3;
-    let maxY = 3;
+    // Начинаем с фактических границ входа (0,0) и целевых карт (8, -2/0/2)
+    let minX = 0;
+    let maxX = 8;
+    let minY = -2;
+    let maxY = 2;
 
     Object.keys(grid).forEach(key => {
       const [xStr, yStr] = key.split(',');
@@ -455,7 +474,7 @@ export default function App() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setScale(prev => Math.min(1.5, prev + 0.05))}
+                    onClick={() => setScale(prev => Math.min(1.5, Math.max(0.15, prev + 0.05))}
                     className="p-0.5 px-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded text-stone-300 font-mono text-[10px] cursor-pointer"
                     title="Приблизить (или Колесиком мыши)"
                   >
@@ -463,7 +482,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setScale(0.6)}
+                    onClick={() => setScale(0.85)}
                     className="p-0.5 px-1 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded text-stone-400 hover:text-stone-200 font-mono text-[8px] cursor-pointer uppercase"
                     title="Сбросить масштаб"
                   >
@@ -497,21 +516,15 @@ export default function App() {
               )}
             </div>
 
-            {/* Scrollable Panning Board Canvas with Wheel Zoom and Click-Drag Panning support */}
+            {/* Scrollable Panning Board Canvas (Обработчик 'onWheel' удален отсюда в 'useEffect' с passive: false) */}
             <div
               id="board-canvas"
               ref={boardContainerRef}
               className="flex-1 overflow-auto border border-stone-800 rounded-xl p-4 bg-stone-950 relative shadow-inner flex items-start justify-start"
-              onWheel={(e) => {
-                // Zoom on wheel scroll inside the board
-                e.preventDefault();
-                const zoomFactor = e.deltaY < 0 ? 0.05 : -0.05;
-                setScale(prev => Math.min(1.5, Math.max(0.15, prev + zoomFactor)));
-              }}
             >
-              {/* Actual Map Grid */}
+              {/* Actual Map Grid — Изменено p-20 на p-6 для экономии места */}
               <div 
-                className="flex flex-col gap-2 min-w-max p-20 select-none transition-transform duration-100 ease-out origin-top-left"
+                className="flex flex-col gap-2 min-w-max p-6 select-none transition-transform duration-100 ease-out origin-top-left"
                 style={{ transform: `scale(${scale})` }}
               >
                 {gridRows.map((row, yIdx) => (
