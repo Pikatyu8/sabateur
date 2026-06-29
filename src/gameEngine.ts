@@ -460,16 +460,21 @@ export const validateTunnelPlacement = (
 
     if (neighbor) {
       hasNeighbor = true;
-      const neighborInfo = getRotatedExitsAndConnections(neighbor);
-      const opposing = getOpposingDir(dir);
+      
+      // ГАРАНТИЯ ПРАВИЛ: Карты целей освобождены от правил сопоставления стыков.
+      // Игрок может прикладывать к ним как открытый туннель, так и стену.
+      if (!neighbor.isGoal) {
+        const neighborInfo = getRotatedExitsAndConnections(neighbor);
+        const opposing = getOpposingDir(dir);
 
-      const myExit = tempInfo.exits[dir];
-      const neighborExit = neighborInfo.exits[opposing];
+        const myExit = tempInfo.exits[dir];
+        const neighborExit = neighborInfo.exits[opposing];
 
-      // Exits must match exactly on the border: path to path (both true) or wall to wall (both false)
-      if (myExit !== neighborExit) {
-        matchesAllNeighbors = false;
-        break;
+        // Проверяем состыковку только с ОБЫЧНЫМИ картами туннелей
+        if (myExit !== neighborExit) {
+          matchesAllNeighbors = false;
+          break;
+        }
       }
     }
   }
@@ -482,13 +487,12 @@ export const validateTunnelPlacement = (
     return { valid: false, reason: 'Туннели на стыке карт не совпадают' };
   }
 
-  // 4. ГАРАНТИЯ ПРАВИЛ: Временно размещаем карту в сетке и проверяем, доходит ли до неё
-  // непрерывный путь от стартовой лестницы. Это полностью пресекает постройку от заблокированных сторон тупиков.
+  // 4. Проверяем непрерывность связи нового элемента со стартом
   const tempGrid = { ...grid, [key]: tempPlaced };
   const reached = calculateReachability(tempGrid);
 
   if (!reached.has(key)) {
-    return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа (нельзя строить от закрытых стен тупиков)' };
+    return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа (нельзя строить от тупиков)' };
   }
 
   return { valid: true };

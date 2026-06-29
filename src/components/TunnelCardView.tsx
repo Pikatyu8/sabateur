@@ -32,66 +32,91 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
     ${isSelected ? 'scale-105 ring-2 ring-amber-400 shadow-lg shadow-amber-400/30' : 'hover:scale-[1.02] shadow-md'}
   `;
 
-  // 1. Закрытая карта цели (только если она не проложена туннелем И не раскрыта тайно через карту «Секретная карта»)
+// 1. Закрытая карта цели (с тонкими полупрозрачными проходами для наглядности)
   if (isGoal && !flipped && card.id === 'goal_hidden') {
     return (
       <div
         id={`card-goal-hidden-${card.id}`}
-        className={`${baseClass} bg-gradient-to-br from-stone-800 to-amber-950 border-2 border-amber-800/60 flex items-center justify-center`}
+        className={`${baseClass} bg-gradient-to-br from-stone-800 to-amber-950 border border-amber-800/60 flex items-center justify-center`}
         onClick={onClick}
       >
-        <div className="absolute inset-1 rounded border border-amber-900/30 flex flex-col items-center justify-center gap-1">
-          <HelpCircle className="w-6 h-6 text-amber-700 animate-pulse" />
-          <span className="font-mono text-[9px] text-amber-700/80 uppercase tracking-widest font-bold">Цель</span>
+        {/* Тонкая разметка проходов показывает игрокам, что цель принимает стыки со всех сторон */}
+        <div className="absolute top-0 left-[calc(50%-5px)] w-2.5 h-1/2 bg-amber-900/10 border-x border-amber-950/20" />
+        <div className="absolute bottom-0 left-[calc(50%-5px)] w-2.5 h-1/2 bg-amber-900/10 border-x border-amber-950/20" />
+        <div className="absolute left-0 top-[calc(50%-5px)] h-2.5 w-1/2 bg-amber-900/10 border-y border-amber-950/20" />
+        <div className="absolute right-0 top-[calc(50%-5px)] h-2.5 w-1/2 bg-amber-900/10 border-y border-amber-950/20" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-amber-950/20 border border-amber-900/20" />
+
+        <div className="absolute inset-1 rounded border border-amber-900/25 flex flex-col items-center justify-center gap-1 bg-stone-950/10 backdrop-blur-[0.5px] z-10">
+          <HelpCircle className="w-5 h-5 text-amber-700/80 animate-pulse" />
+          <span className="font-mono text-[9px] text-amber-700/70 uppercase tracking-widest font-bold">Цель</span>
         </div>
       </div>
     );
   }
 
-  // 2. Раскрытая золотая жила (показана, если проложен туннель ИЛИ если игрок тайно посмотрел её)
+  // 2. Раскрытая золотая жила (пути на фоне, монеты в центре с обводкой)
   if (isGoal && (flipped || card.id !== 'goal_hidden') && isGold) {
     return (
       <div
         id={`card-goal-gold-${card.id}`}
-        className={`${baseClass} bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600 border-2 border-yellow-300 text-stone-900 shadow-xl shadow-yellow-500/20`}
+        className={`${baseClass} bg-gradient-to-br from-stone-900 via-stone-800 to-stone-950 border border-yellow-500/50 text-stone-300 shadow-xl shadow-yellow-500/10`}
         onClick={onClick}
       >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-yellow-300/40 via-transparent to-transparent animate-pulse" />
-        <div className="absolute inset-1 rounded border border-yellow-200/40 flex flex-col items-center justify-center gap-1 bg-yellow-950/10">
-          <Coins className="w-8 h-8 text-yellow-100 drop-shadow-md animate-bounce" />
-          <span className="font-sans text-[8px] text-yellow-100 font-bold uppercase tracking-wider bg-amber-950/40 px-1 rounded text-center">
-            {flipped ? 'ЗОЛОТО!' : 'ТАЙНОЕ ЗОЛОТО'}
-          </span>
-          {/* Значок глаза указывает, что карта подсмотрена тайно и другие игроки её не видят */}
-          {!flipped && (
-            <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-amber-500/30">
-              <Eye className="w-3 h-3 text-amber-400" />
-            </div>
-          )}
+        {/* Полноценные золотые туннели на заднем плане */}
+        <div className="absolute top-0 left-[calc(50%-6px)] w-3 h-1/2 bg-amber-500/35 border-x border-amber-600/30" />
+        <div className="absolute bottom-0 left-[calc(50%-6px)] w-3 h-1/2 bg-amber-500/35 border-x border-amber-600/30" />
+        <div className="absolute left-0 top-[calc(50%-6px)] h-3 w-1/2 bg-amber-500/35 border-y border-amber-600/30" />
+        <div className="absolute right-0 top-[calc(50%-6px)] h-3 w-1/2 bg-amber-500/35 border-y border-amber-600/30" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-500/40 border border-amber-600/40" />
+
+        {/* Центральная круглая бленда с иконкой золота и яркой обводкой */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-yellow-950/95 border-2 border-yellow-400 flex flex-col items-center justify-center shadow-lg shadow-yellow-500/20 z-10">
+          <Coins className="w-5 h-5 text-yellow-400 animate-bounce" />
         </div>
+
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-bold text-yellow-400 font-mono tracking-wider bg-stone-950/80 px-1 rounded z-10 border border-yellow-500/20">
+          {flipped ? 'ЗОЛОТО!' : 'ТАЙНОЕ'}
+        </div>
+        
+        {!flipped && (
+          <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-amber-500/30 z-10">
+            <Eye className="w-3 h-3 text-amber-400" />
+          </div>
+        )}
       </div>
     );
   }
 
-  // 3. Раскрытый пустой камень (показан, если проложен туннель ИЛИ если игрок тайно посмотрел его)
+  // 3. Раскрытый обычный камень (пути на фоне, глыба в центре с обводкой)
   if (isGoal && (flipped || card.id !== 'goal_hidden') && !isGold) {
     return (
       <div
         id={`card-goal-stone-${card.id}`}
-        className={`${baseClass} bg-gradient-to-br from-stone-700 to-stone-900 border-2 border-stone-600 text-stone-400`}
+        className={`${baseClass} bg-gradient-to-br from-stone-900 via-stone-800 to-stone-950 border border-stone-600/50 text-stone-400`}
         onClick={onClick}
       >
-        <div className="absolute inset-1 rounded border border-stone-600/30 flex flex-col items-center justify-center gap-1 bg-black/15">
-          <Layers className="w-7 h-7 text-stone-500" />
-          <span className="font-sans text-[8px] text-stone-400 font-bold uppercase tracking-wider text-center">
-            {flipped ? 'Камень' : 'Тайный камень'}
-          </span>
-          {!flipped && (
-            <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-stone-500/30">
-              <Eye className="w-3 h-3 text-stone-400" />
-            </div>
-          )}
+        {/* Каменные туннели на заднем плане */}
+        <div className="absolute top-0 left-[calc(50%-6px)] w-3 h-1/2 bg-stone-700/30 border-x border-stone-800/30" />
+        <div className="absolute bottom-0 left-[calc(50%-6px)] w-3 h-1/2 bg-stone-700/30 border-x border-stone-800/30" />
+        <div className="absolute left-0 top-[calc(50%-6px)] h-3 w-1/2 bg-stone-700/30 border-y border-stone-800/30" />
+        <div className="absolute right-0 top-[calc(50%-6px)] h-3 w-1/2 bg-stone-700/30 border-y border-stone-800/30" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-stone-700/40 border border-stone-800/40" />
+
+        {/* Центральная круглая бленда с иконкой камня и серой обводкой */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-stone-950/95 border-2 border-stone-500 flex flex-col items-center justify-center shadow-md z-10">
+          <Layers className="w-5 h-5 text-stone-400" />
         </div>
+
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-bold text-stone-400 font-mono tracking-wider bg-stone-950/80 px-1 rounded z-10 border border-stone-600/20">
+          {flipped ? 'КАМЕНЬ' : 'ТАЙНЫЙ'}
+        </div>
+
+        {!flipped && (
+          <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-stone-500/30 z-10">
+            <Eye className="w-3 h-3 text-stone-400" />
+          </div>
+        )}
       </div>
     );
   }
