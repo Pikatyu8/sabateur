@@ -1,7 +1,6 @@
-// src/components/BoardCanvas.tsx
 import React from 'react';
 import { TunnelCard } from '../types';
-import { Pickaxe, Flame, Coins, HelpCircle, Layers, ShieldAlert } from 'lucide-react';
+import { Pickaxe, Flame, Coins, HelpCircle, Layers, ShieldAlert, Eye } from 'lucide-react';
 
 interface TunnelCardViewProps {
   card: TunnelCard;
@@ -32,8 +31,8 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
     ${isSelected ? 'scale-105 ring-2 ring-amber-400 shadow-lg shadow-amber-400/30' : 'hover:scale-[1.02] shadow-md'}
   `;
 
-  // 1. Goal card (face-down)
-  if (isGoal && !flipped) {
+  // 1. Закрытая карта цели (только если она не проложена туннелем И не раскрыта тайно через карту «Секретная карта»)
+  if (isGoal && !flipped && card.id === 'goal_hidden') {
     return (
       <div
         id={`card-goal-hidden-${card.id}`}
@@ -48,8 +47,8 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
     );
   }
 
-  // 2. Goal card (revealed gold)
-  if (isGoal && flipped && isGold) {
+  // 2. Раскрытая золотая жила (показана, если проложен туннель ИЛИ если игрок тайно посмотрел её)
+  if (isGoal && (flipped || card.id !== 'goal_hidden') && isGold) {
     return (
       <div
         id={`card-goal-gold-${card.id}`}
@@ -59,14 +58,22 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-yellow-300/40 via-transparent to-transparent animate-pulse" />
         <div className="absolute inset-1 rounded border border-yellow-200/40 flex flex-col items-center justify-center gap-1 bg-yellow-950/10">
           <Coins className="w-8 h-8 text-yellow-100 drop-shadow-md animate-bounce" />
-          <span className="font-sans text-[10px] text-yellow-100 font-bold uppercase tracking-wider bg-amber-950/40 px-1.5 rounded">ЗОЛОТО!</span>
+          <span className="font-sans text-[8px] text-yellow-100 font-bold uppercase tracking-wider bg-amber-950/40 px-1 rounded text-center">
+            {flipped ? 'ЗОЛОТО!' : 'ТАЙНОЕ ЗОЛОТО'}
+          </span>
+          {/* Значок глаза указывает, что карта подсмотрена тайно и другие игроки её не видят */}
+          {!flipped && (
+            <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-amber-500/30">
+              <Eye className="w-3 h-3 text-amber-400" />
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // 3. Goal card (revealed stone)
-  if (isGoal && flipped && !isGold) {
+  // 3. Раскрытый пустой камень (показан, если проложен туннель ИЛИ если игрок тайно посмотрел его)
+  if (isGoal && (flipped || card.id !== 'goal_hidden') && !isGold) {
     return (
       <div
         id={`card-goal-stone-${card.id}`}
@@ -75,7 +82,14 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
       >
         <div className="absolute inset-1 rounded border border-stone-600/30 flex flex-col items-center justify-center gap-1 bg-black/15">
           <Layers className="w-7 h-7 text-stone-500" />
-          <span className="font-sans text-[9px] text-stone-500 font-bold uppercase tracking-wider">Камень</span>
+          <span className="font-sans text-[8px] text-stone-400 font-bold uppercase tracking-wider text-center">
+            {flipped ? 'Камень' : 'Тайный камень'}
+          </span>
+          {!flipped && (
+            <div className="absolute top-1 right-1 p-0.5 bg-stone-950/80 rounded border border-stone-500/30">
+              <Eye className="w-3 h-3 text-stone-400" />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -89,10 +103,8 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         className={`${baseClass} bg-gradient-to-br from-amber-900 to-stone-900 border-2 border-amber-800 text-amber-100`}
         onClick={onClick}
       >
-        {/* Entrance paths (crossroad) */}
         <div className="absolute top-0 left-[calc(50%-5px)] w-[10px] h-full bg-amber-700/40" />
         <div className="absolute left-0 top-[calc(50%-5px)] h-[10px] w-full bg-amber-700/40" />
-        {/* Draw a ladder */}
         <div className="absolute inset-0 flex flex-col justify-between py-2 items-center z-10">
           <div className="text-[9px] font-mono uppercase font-bold text-amber-500/80">Вход</div>
           <div className="flex flex-col gap-0.5 w-4 items-center">
@@ -110,10 +122,7 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
   }
 
   // 5. Normal Tunnel Card
-  // Check if it's a dead-end (isDeadEnd if connected parts are all isolated singletons)
   const isDeadEnd = card.connectedParts.every(part => part.length === 1);
-
-  // Rotation styling
   const rotationClass = rotated ? 'rotate-180' : '';
 
   return (
@@ -122,10 +131,8 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
       className={`${baseClass} bg-stone-900 border border-stone-800/80 text-stone-300 ${rotationClass}`}
       onClick={onClick}
     >
-      {/* Background brick lines for atmosphere */}
       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px]" />
 
-      {/* Exits Paths */}
       {card.exits.top && (
         <div className="absolute top-0 left-[calc(50%-6px)] w-3 h-1/2 bg-amber-800/70 border-x border-amber-900/40" />
       )}
@@ -139,18 +146,14 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         <div className="absolute right-0 top-[calc(50%-6px)] h-3 w-1/2 bg-amber-800/70 border-y border-amber-900/40" />
       )}
 
-      {/* Connected center or dead end block */}
       {!isDeadEnd ? (
-        // Round open path center
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-800/70 border border-amber-900/40" />
       ) : (
-        // Rock block center for dead ends
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 bg-stone-700 rounded border border-stone-600 flex items-center justify-center">
           <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
         </div>
       )}
 
-      {/* Decorative text/indicators */}
       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[8px] text-stone-500 font-mono tracking-tighter truncate max-w-full px-0.5 bg-stone-950/60 rounded">
         {isDeadEnd ? 'Тупик' : 'Путь'}
       </div>
