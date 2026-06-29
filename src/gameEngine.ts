@@ -440,7 +440,6 @@ export const validateTunnelPlacement = (
     return { valid: false, reason: 'Нельзя строить на входе в шахту' };
   }
 
-  // Helper to create the hypothetical placed card
   const tempPlaced: PlacedCard = { card, rotated, x, y };
   const tempInfo = getRotatedExitsAndConnections(tempPlaced);
 
@@ -454,10 +453,6 @@ export const validateTunnelPlacement = (
 
   let hasNeighbor = false;
   let matchesAllNeighbors = true;
-  let connectsToContinuousPath = false;
-
-  // Calculate reachability of existing grid BEFORE adding this card
-  const reachedBefore = calculateReachability(grid);
 
   for (const { dir, nx, ny } of neighbors) {
     const neighborKey = `${nx},${ny}`;
@@ -471,19 +466,10 @@ export const validateTunnelPlacement = (
       const myExit = tempInfo.exits[dir];
       const neighborExit = neighborInfo.exits[opposing];
 
-      // Exits must match: both true or both false
+      // Exits must match exactly on the border: path to path (both true) or wall to wall (both false)
       if (myExit !== neighborExit) {
         matchesAllNeighbors = false;
         break;
-      }
-
-      // If both exits are open (paths connect), and the neighbor is reached by a continuous path,
-      // then our new card is connected to the path!
-      if (myExit && neighborExit && reachedBefore.has(neighborKey)) {
-        // If the neighbor is a goal card, we can only connect if it is already flipped
-        if (!neighbor.isGoal || neighbor.flipped) {
-          connectsToContinuousPath = true;
-        }
       }
     }
   }
@@ -496,8 +482,13 @@ export const validateTunnelPlacement = (
     return { valid: false, reason: 'Туннели на стыке карт не совпадают' };
   }
 
-  if (!connectsToContinuousPath) {
-    return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+  // 4. ГАРАНТИЯ ПРАВИЛ: Временно размещаем карту в сетке и проверяем, доходит ли до неё
+  // непрерывный путь от стартовой лестницы. Это полностью пресекает постройку от заблокированных сторон тупиков.
+  const tempGrid = { ...grid, [key]: tempPlaced };
+  const reached = calculateReachability(tempGrid);
+
+  if (!reached.has(key)) {
+    return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа (нельзя строить от закрытых стен тупиков)' };
   }
 
   return { valid: true };

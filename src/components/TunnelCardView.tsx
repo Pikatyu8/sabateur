@@ -1,3 +1,4 @@
+// src/components/TunnelCardView.tsx
 import React from 'react';
 import { TunnelCard } from '../types';
 import { Pickaxe, Flame, Coins, HelpCircle, Layers, ShieldAlert, Eye } from 'lucide-react';
