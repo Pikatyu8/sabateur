@@ -47,7 +47,7 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
   };
 };
 
-const getPeerConfig = () => {
+const getPeerConfig = (iceServers?: any[]) => {
   if (typeof window === 'undefined') return undefined;
 
   const host = window.location.hostname;
@@ -60,6 +60,16 @@ const getPeerConfig = () => {
     host.includes('web-preview') ||
     host.includes('aistudio');
 
+  // Подготавливаем конфигурацию серверов
+  const iceConfig = {
+    iceServers: iceServers && iceServers.length > 0 ? iceServers : [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' }
+    ]
+  };
+
   if (isLocalOrContainer) {
     const secure = window.location.protocol === 'https:';
     const port = window.location.port ? parseInt(window.location.port, 10) : (secure ? 443 : 80);
@@ -68,27 +78,19 @@ const getPeerConfig = () => {
       port,
       path: '/peerjs',
       secure,
-      debug: 2,
+      debug: 3, // Включаем подробные логи WebRTC для отладки
+      config: iceConfig, // <-- ОБЯЗАТЕЛЬНО: Передаем TURN-серверы и для локального режима/контейнера!
     };
   }
 
   // На GitHub Pages подключаемся к вашему бэкенду на Hugging Face Spaces!
-  // ВНИМАНИЕ: Замените "pikatyu8" на ваш юзернейм на Hugging Face, 
-  // а "saboteur-backend" на точное имя созданного вами Space.
   return {
     host: 'niksan0011-saboteur-backend.hf.space', 
     port: 443,
     secure: true,
     path: '/peerjs',
-    debug: 3, // <-- ИЗМЕНИТЕ НА 3: PeerJS начнет выводить все этапы handshake в консоль браузера!
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' }
-      ]
-    }
+    debug: 3,
+    config: iceConfig, // <-- Передаем также и для продакшна
   };
 }
 
