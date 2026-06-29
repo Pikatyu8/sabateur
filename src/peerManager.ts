@@ -314,12 +314,13 @@ export const usePeerGame = () => {
   };
 
   // CLIENT: Join Room
-  const joinRoom = (code: string, playerName: string) => {
+  const joinRoom = async (code: string, playerName: string) => { // <-- Добавили async
     setConnectionStatus('connecting');
     setRoomCode(code.toUpperCase());
     setIsHost(false);
 
-    const newPeer = new Peer(getPeerConfig());
+    const iceServers = await fetchIceServers(); // <-- Шаг 1: запрашиваем список серверов
+    const newPeer = new Peer(getPeerConfig(iceServers)); // <-- Шаг 2: передаем список в конфиг
 
     newPeer.on('open', (myPeerId) => {
       setPeerId(myPeerId);
