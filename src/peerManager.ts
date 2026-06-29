@@ -184,10 +184,20 @@ export const usePeerGame = () => {
 
     // Send filtered state to each connected peer
     Object.entries(connectionsRef.current).forEach(([pId, conn]) => {
-      const filtered = filterStateForPlayer(fullState, pId);
-      (conn as any).send({ type: 'STATE_UPDATE', payload: filtered });
+      if (conn && conn.open) {
+        try {
+          const filtered = filterStateForPlayer(fullState, pId);
+          conn.send({ type: 'STATE_UPDATE', payload: filtered });
+        } catch (e) {
+          console.warn(`Не удалось отправить состояние игроку ${pId}:`, e);
+        }
+      } else {
+        // Clean up dead connection reference
+        delete connectionsRef.current[pId];
+      }
     });
   };
+
 
   // HOST: Initialize Room
   const createRoom = async (playerName: string) => { // <-- Добавили async
@@ -434,9 +444,15 @@ export const usePeerGame = () => {
     if (!player) return;
 
     player.active = false;
+
+    // КРИТИЧЕСКИ ВАЖНО: Удаляем ссылку на соединение до вызова broadcastState,
+    // чтобы предотвратить рекурсивную ошибку отправки в закрытый сокет.
+    delete connectionsRef.current[player.id];
+
     let updatedState = addLog(fullState, `Игрок ${player.name} отключился`, 'warning');
     broadcastState(updatedState);
   };
+
 
   // Authoritative action processing on Host
   const handleNetworkAction = (senderId: string, action: NetworkAction) => {

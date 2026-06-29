@@ -94,13 +94,14 @@ export default function BoardCanvas({
       ref={boardContainerRef}
       className="flex-1 overflow-auto border border-stone-800 rounded-xl p-4 bg-stone-950 relative shadow-inner flex items-start justify-start"
     >
-      {/* Плотная сетка с отступом p-6 вместо p-20 */}
+      {/* Зазоры между картами уменьшены с gap-2 до gap-1.5, а внутренний отступ уменьшен с p-6 до p-2 */}
       <div 
-        className="flex flex-col gap-2 min-w-max p-6 select-none transition-transform duration-100 ease-out origin-top-left"
+        className="flex flex-col gap-1.5 min-w-max p-2 select-none transition-transform duration-100 ease-out origin-top-left"
         style={{ transform: `scale(${scale})` }}
       >
         {gridRows.map((row, yIdx) => (
-          <div key={yIdx} className="flex gap-2 justify-center">
+          // Зазоры в строках также уменьшены до gap-1.5
+          <div key={yIdx} className="flex gap-1.5 justify-center">
             {row.map(({ x, y }) => {
               const key = `${x},${y}`;
               const placed = gameState.grid[key];
@@ -178,7 +179,7 @@ export default function BoardCanvas({
                 return (
                   <div
                     key={key}
-                    className="w-16 h-24 rounded-lg bg-stone-900/10 border border-stone-900/30 flex flex-col justify-between p-1 items-center hover:bg-stone-900/20 transition-colors"
+                    className="w-16 h-24 rounded-lg bg-stone-900/10 border border-stone-900/20 flex flex-col justify-between p-1 items-center hover:bg-stone-900/20 transition-colors"
                   >
                     <span className="text-[7px] text-stone-700/60 font-mono">X: {x}</span>
                     <span className="text-[7px] text-stone-700/60 font-mono">Y: {y}</span>

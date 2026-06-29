@@ -28,7 +28,9 @@ export default function App() {
   const [playerName, setPlayerName] = useState<string>('');
   const [joinCode, setJoinCode] = useState<string>('');
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
-  const [scale, setScale] = useState<number>(0.85); // Масштаб по умолчанию увеличен для удобства
+  
+  // Уменьшаем начальный масштаб по умолчанию для лучшего обзора
+  const [scale, setScale] = useState<number>(0.7); 
   const [isRotated, setIsRotated] = useState<boolean>(false);
   const [chatInput, setChatInput] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'board' | 'players' | 'chat' | 'logs'>('board');
@@ -91,8 +93,8 @@ export default function App() {
       : null;
 
     return (
-      <div id="game-arena" className="min-h-screen bg-stone-950 text-stone-100 font-sans flex flex-col selection:bg-amber-800">
-        
+      // Изменено с min-h-screen на h-screen max-h-screen overflow-hidden для предотвращения общей прокрутки страницы
+      <div id="game-arena" className="h-screen max-h-screen bg-stone-950 text-stone-100 font-sans flex flex-col selection:bg-amber-800 overflow-hidden"> 
         {/* Шапка игры */}
         <header className="bg-stone-900/90 border-b border-stone-800 p-3 flex justify-between items-center shrink-0 z-30 sticky top-0 backdrop-blur-sm">
           <div className="flex items-center gap-3">
