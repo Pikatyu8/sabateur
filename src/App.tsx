@@ -474,7 +474,7 @@ export default function App() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setScale(prev => Math.min(1.5, Math.max(0.15, prev + 0.05))}
+                    onClick={() => setScale(prev => Math.min(1.5, Math.max(0.15, prev + 0.05)))}
                     className="p-0.5 px-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded text-stone-300 font-mono text-[10px] cursor-pointer"
                     title="Приблизить (или Колесиком мыши)"
                   >
