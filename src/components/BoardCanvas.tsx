@@ -1,7 +1,6 @@
-// src/components/BoardCanvas.tsx
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Flame, Eye } from 'lucide-react';
-import { GameState, PlacedCard, Card, NetworkAction } from '../types';
+import { GameState, PlacedCard, NetworkAction } from '../types';
 import { TunnelCardView } from './TunnelCardView';
 import { validateTunnelPlacement } from '../gameEngine';
 
@@ -26,6 +25,11 @@ export default function BoardCanvas({
 }: BoardCanvasProps) {
   const boardContainerRef = useRef<HTMLDivElement>(null);
 
+  // Состояния для перетаскивания поля мышкой
+  const [isDragging, setIsDragging] = useState(false);
+  const [hasDragged, setHasDragged] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
   // Автоматически скроллит поле в центр (к стартовой карте 0,0) в начале раундов
   useEffect(() => {
     const container = boardContainerRef.current;
@@ -36,13 +40,86 @@ export default function BoardCanvas({
       const centerY = (container.scrollHeight - container.clientHeight) / 2;
       container.scrollLeft = centerX;
       container.scrollTop = centerY;
-    }, 100);
+    }, 120);
 
     return () => clearTimeout(timeout);
   }, [gameState.round, gameState.status]);
 
+  // Обработчики мыши для скролла перетаскиванием
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Только левая кнопка мыши
+
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    setIsDragging(true);
+    setHasDragged(false);
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+    };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    const dx = e.clientX - dragStart.current.x;
+    const dy = e.clientY - dragStart.current.y;
+
+    // Считаем перетаскиванием, если мышь сдвинулась более чем на 5px
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      setHasDragged(true);
+    }
+
+    container.scrollLeft = dragStart.current.scrollLeft - dx;
+    container.scrollTop = dragStart.current.scrollTop - dy;
+  };
+
+  const handleMouseUpOrLeave = () => {
+    setIsDragging(false);
+  };
+
+  // Сенсорные обработчики для мобильных устройств
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    const touch = e.touches[0];
+    setIsDragging(true);
+    setHasDragged(false);
+    dragStart.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return;
+
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - dragStart.current.x;
+    const dy = touch.clientY - dragStart.current.y;
+
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      setHasDragged(true);
+    }
+
+    container.scrollLeft = dragStart.current.scrollLeft - dx;
+    container.scrollTop = dragStart.current.scrollTop - dy;
+  };
+
+  // Расчет границ сетки: даем запас в 4 пустые ячейки для ощущения бесконечности поля
   const getGridRange = (grid: Record<string, PlacedCard>) => {
-    // Начальные компактные границы для лучшей видимости
     let minX = 0;
     let maxX = 8;
     let minY = -2;
@@ -59,10 +136,10 @@ export default function BoardCanvas({
     });
 
     return {
-      minX: minX - 1,
-      maxX: maxX + 1,
-      minY: minY - 1,
-      maxY: maxY + 1,
+      minX: minX - 4,
+      maxX: maxX + 4,
+      minY: minY - 4,
+      maxY: maxY + 4,
     };
   };
 
@@ -88,19 +165,27 @@ export default function BoardCanvas({
     return validateTunnelPlacement(gameState.grid, selectedCard, x, y, isRotated);
   };
 
+  // Стилизация курсора в зависимости от состояния зажатой мыши
+  const cursorClass = isDragging ? 'cursor-grabbing select-none' : 'cursor-grab';
+
   return (
     <div
       id="board-canvas"
       ref={boardContainerRef}
-      className="flex-1 overflow-auto border border-stone-800 rounded-xl p-4 bg-stone-950 relative shadow-inner flex items-start justify-start"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUpOrLeave}
+      onMouseLeave={handleMouseUpOrLeave}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleMouseUpOrLeave}
+      className={`flex-1 overflow-auto border border-stone-800 rounded-xl p-4 bg-stone-950 relative shadow-inner flex items-start justify-start ${cursorClass}`}
     >
-      {/* Зазоры между картами уменьшены с gap-2 до gap-1.5, а внутренний отступ уменьшен с p-6 до p-2 */}
       <div 
         className="flex flex-col gap-1.5 min-w-max p-2 select-none transition-transform duration-100 ease-out origin-top-left"
         style={{ transform: `scale(${scale})` }}
       >
         {gridRows.map((row, yIdx) => (
-          // Зазоры в строках также уменьшены до gap-1.5
           <div key={yIdx} className="flex gap-1.5 justify-center">
             {row.map(({ x, y }) => {
               const key = `${x},${y}`;
@@ -114,11 +199,16 @@ export default function BoardCanvas({
                 if (canCaveIn) borderHighlight = 'ring-2 ring-red-500 animate-pulse scale-102 z-20';
                 if (canMap) borderHighlight = 'ring-2 ring-sky-500 animate-pulse scale-102 z-20';
 
+                // Точное определение наличия золота
+                const goalInfo = gameState.goals.find(g => g.x === x && g.y === y);
+                const isGold = !!(placed.isGold || (goalInfo && goalInfo.isGold) || (placed.card && placed.card.id === 'goal_gold'));
+
                 return (
                   <div
                     key={key}
                     className={`relative transition-all duration-200 ${borderHighlight}`}
                     onClick={() => {
+                      if (hasDragged) return; // Игнорируем клик, если это было перетаскивание поля
                       if (canCaveIn) {
                         sendAction({
                           type: 'PLAY_ACTION',
@@ -138,7 +228,7 @@ export default function BoardCanvas({
                       card={placed.card}
                       rotated={placed.rotated}
                       isGoal={placed.isGoal}
-                      isGold={placed.isGold}
+                      isGold={isGold}
                       isEntrance={placed.isEntrance}
                       flipped={placed.flipped}
                     />
@@ -165,6 +255,7 @@ export default function BoardCanvas({
                         rotated={isRotated}
                         preview={true}
                         onClick={() => {
+                          if (hasDragged) return; // Игнорируем клик при перетаскивании
                           sendAction({
                             type: 'PLAY_TUNNEL',
                             payload: { cardId: selectedCardIds[0], x, y, rotated: isRotated }
@@ -181,8 +272,8 @@ export default function BoardCanvas({
                     key={key}
                     className="w-16 h-24 rounded-lg bg-stone-900/10 border border-stone-900/20 flex flex-col justify-between p-1 items-center hover:bg-stone-900/20 transition-colors"
                   >
-                    <span className="text-[7px] text-stone-700/60 font-mono">X: {x}</span>
-                    <span className="text-[7px] text-stone-700/60 font-mono">Y: {y}</span>
+                    <span className="text-[7px] text-stone-800/50 font-mono">X: {x}</span>
+                    <span className="text-[7px] text-stone-800/50 font-mono">Y: {y}</span>
                   </div>
                 );
               }

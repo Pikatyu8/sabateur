@@ -21,13 +21,35 @@ const getSessionClientId = () => {
   return id;
 };
 
-// Filter state for a specific player to prevent cheating (hiding other roles and hands)
+// Обновленная функция фильтрации (добавлено маскирование grid для защиты от читов)
 export const filterStateForPlayer = (state: GameState, playerId: string): GameState => {
   const isRoundOver = state.status === 'round_end' || state.status === 'game_end';
+
+  // Маскируем неоткрытые цели на игровом поле, чтобы клиенты не знали заранее, где золото
+  const filteredGrid = { ...state.grid };
+  Object.keys(filteredGrid).forEach(key => {
+    const cell = filteredGrid[key];
+    if (cell.isGoal && !cell.flipped) {
+      const isRevealedByMap = !!state.revealedGoals[`${cell.x},${cell.y}_${playerId}`];
+      if (!isRevealedByMap && !isRoundOver) {
+        filteredGrid[key] = {
+          ...cell,
+          card: {
+            id: 'goal_hidden',
+            type: 'tunnel',
+            name: 'Секретная цель',
+            exits: { top: true, right: true, bottom: true, left: true },
+            connectedParts: [['top', 'right', 'bottom', 'left']],
+          },
+        };
+      }
+    }
+  });
 
   return {
     ...state,
     deck: [], // Clear the actual deck
+    grid: filteredGrid,
     players: state.players.map(p => {
       const isMe = p.id === playerId;
       return {
@@ -949,6 +971,7 @@ export const usePeerGame = () => {
     updated.goals = updated.goals.map(g => {
       const key = `${g.x},${g.y}`;
       if (reachable.has(key) && !g.flipped) {
+        // Goal reached! Reveal it
         const flippedPlaced: PlacedCard = {
           card: g.card,
           rotated: false,
@@ -956,7 +979,8 @@ export const usePeerGame = () => {
           y: g.y,
           isGoal: true,
           flipped: true,
-        };
+          isGold: g.isGold, // Явно сохраняем флаг золота в ячейку поля
+        } as any;
         updated.grid[key] = flippedPlaced;
 
         if (g.isGold) {
