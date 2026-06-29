@@ -1,3 +1,4 @@
+// src/components/ActionCardView.tsx
 import React from 'react';
 import { ActionCard, ToolType } from '../types';
 import { ShieldAlert, ShieldCheck, HelpCircle, Flame, Eye, ShoppingCart, Lightbulb, Hammer } from 'lucide-react';

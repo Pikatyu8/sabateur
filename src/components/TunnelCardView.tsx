@@ -1,3 +1,4 @@
+// src/components/BoardCanvas.tsx
 import React from 'react';
 import { TunnelCard } from '../types';
 import { Pickaxe, Flame, Coins, HelpCircle, Layers, ShieldAlert } from 'lucide-react';
