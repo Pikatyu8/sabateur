@@ -94,6 +94,37 @@ const getPeerConfig = (iceServers?: any[]) => {
   };
 }
 
+const getBackendUrl = () => {
+  if (typeof window === 'undefined') return '';
+  const host = window.location.hostname;
+  const isLocalOrContainer = 
+    host === 'localhost' || 
+    host === '127.0.0.1' || 
+    host.endsWith('.run.app') ||
+    host.includes('web-preview') ||
+    host.includes('aistudio');
+
+  return isLocalOrContainer ? '' : 'https://niksan0011-saboteur-backend.hf.space';
+};
+
+const fetchIceServers = async (): Promise<any[]> => {
+  try {
+    const baseUrl = getBackendUrl();
+    const response = await fetch(`${baseUrl}/api/ice-servers`);
+    if (!response.ok) throw new Error();
+    return await response.json();
+  } catch (e) {
+    console.warn('Не удалось получить TURN-серверы, откат к Google STUN:', e);
+    return [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' }
+    ];
+  }
+};
+
+
 export const usePeerGame = () => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [peerId, setPeerId] = useState<string>('');
@@ -159,14 +190,15 @@ export const usePeerGame = () => {
   };
 
   // HOST: Initialize Room
-  const createRoom = (playerName: string) => {
+  const createRoom = async (playerName: string) => { // <-- Добавили async
     setConnectionStatus('connecting');
     const code = generateRoomCode();
     setRoomCode(code);
     setIsHost(true);
 
+    const iceServers = await fetchIceServers(); // <-- Шаг 1: запрашиваем список серверов
     const fullPeerId = `saboteur-room-${code}`;
-    const newPeer = new Peer(fullPeerId, getPeerConfig());
+    const newPeer = new Peer(fullPeerId, getPeerConfig(iceServers)); // <-- Шаг 2: передаем список в конфиг
 
     newPeer.on('open', (id) => {
       setPeerId(id);
