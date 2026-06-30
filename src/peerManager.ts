@@ -1,16 +1,17 @@
+// src/peerManager.ts
 import { useState, useEffect, useRef } from 'react';
 import Peer, { DataConnection } from 'peerjs';
-import { GameState, Player, Card, TunnelCard, ActionCard, PlacedCard, ToolType, LogEntry, NetworkAction } from './types';
+import { GameState, Player, Card, TunnelCard, ActionCard, PlacedCard, ToolType, LogEntry, NetworkAction, TTTGameState } from './types';
 import {
   createFullDeck,
   getEntranceCard,
   getGoalTemplates,
   validateTunnelPlacement,
   calculateReachability,
-  getOpposingDir
 } from './gameEngine';
+import { canTransformCard, transformCard } from './goldEngine';
+import { checkTTTWinner, isTTTBoardFull } from './ticTacToeEngine';
 
-// Изолированное получение/сохранение уникального ID для вкладки
 const getSessionClientId = () => {
   if (typeof window === 'undefined') return '';
   let id = sessionStorage.getItem('saboteur_peer_id');
@@ -21,11 +22,9 @@ const getSessionClientId = () => {
   return id;
 };
 
-// Обновленная функция фильтрации (добавлено маскирование grid для защиты от читов)
 export const filterStateForPlayer = (state: GameState, playerId: string): GameState => {
   const isRoundOver = state.status === 'round_end' || state.status === 'game_end';
 
-  // Маскируем неоткрытые цели на игровом поле, чтобы клиенты не знали заранее, где золото
   const filteredGrid = { ...state.grid };
   Object.keys(filteredGrid).forEach(key => {
     const cell = filteredGrid[key];
@@ -48,13 +47,14 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
 
   return {
     ...state,
-    deck: [], // Clear the actual deck
+    deck: [], // Очистка настоящей колоды
     grid: filteredGrid,
     players: state.players.map(p => {
       const isMe = p.id === playerId;
+      const isRoleRevealed = isMe || isRoundOver || !!state.revealedRoles[`${p.id}_${playerId}`];
       return {
         ...p,
-        role: (isMe || isRoundOver) ? p.role : null,
+        role: isRoleRevealed ? p.role : null,
         hand: (isMe || isRoundOver) ? p.hand : [],
       };
     }),
@@ -79,9 +79,7 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
 
 const getPeerConfig = (iceServers?: any[]) => {
   if (typeof window === 'undefined') return undefined;
-
   const host = window.location.hostname;
-
   const isLocalOrContainer = 
     host === 'localhost' || 
     host === '127.0.0.1' || 
@@ -91,24 +89,14 @@ const getPeerConfig = (iceServers?: any[]) => {
 
   const iceConfig = {
     iceServers: iceServers && iceServers.length > 0 ? iceServers : [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' }
+      { urls: 'stun:stun.l.google.com:19302' }
     ]
   };
 
   if (isLocalOrContainer) {
     const secure = window.location.protocol === 'https:';
     const port = window.location.port ? parseInt(window.location.port, 10) : (secure ? 443 : 80);
-    return {
-      host,
-      port,
-      path: '/peerjs',
-      secure,
-      debug: 3,
-      config: iceConfig,
-    };
+    return { host, port, path: '/peerjs', secure, debug: 3, config: iceConfig };
   }
 
   return {
@@ -119,38 +107,7 @@ const getPeerConfig = (iceServers?: any[]) => {
     debug: 3,
     config: iceConfig,
   };
-}
-
-const getBackendUrl = () => {
-  if (typeof window === 'undefined') return '';
-  const host = window.location.hostname;
-  const isLocalOrContainer = 
-    host === 'localhost' || 
-    host === '127.0.0.1' || 
-    host.endsWith('.run.app') ||
-    host.includes('web-preview') ||
-    host.includes('aistudio');
-
-  return isLocalOrContainer ? '' : 'https://niksan0011-saboteur-backend.hf.space';
 };
-
-const fetchIceServers = async (): Promise<any[]> => {
-  try {
-    const baseUrl = getBackendUrl();
-    const response = await fetch(`${baseUrl}/api/ice-servers`);
-    if (!response.ok) throw new Error();
-    return await response.json();
-  } catch (e) {
-    console.warn('Не удалось получить TURN-серверы, откат к Google STUN:', e);
-    return [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' }
-    ];
-  }
-};
-
 
 export const usePeerGame = () => {
   const [peer, setPeer] = useState<Peer | null>(null);
@@ -159,21 +116,17 @@ export const usePeerGame = () => {
   const [isHost, setIsHost] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [errorMessage, setErrorMessage] = useState<string>('');
-
-  // Authorized local state (full state for the host, filtered state for the client)
   const [gameState, setGameState] = useState<GameState | null>(null);
 
-  // References for host to track active connections
   const connectionsRef = useRef<Record<string, DataConnection>>({});
   const trueGameStateRef = useRef<GameState | null>(null);
   const myPlayerIdRef = useRef<string>('');
+  const tttTimerIntervalRef = useRef<any>(null);
 
-  // Clean up connections on unmount
   useEffect(() => {
     return () => {
-      if (peer) {
-        peer.destroy();
-      }
+      if (peer) peer.destroy();
+      if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
     };
   }, [peer]);
 
@@ -186,7 +139,6 @@ export const usePeerGame = () => {
     return code;
   };
 
-  // Log helper
   const addLog = (state: GameState, message: string, type: LogEntry['type'] = 'info', playerName?: string): GameState => {
     const newLog: LogEntry = {
       id: Math.random().toString(36).substring(2, 9),
@@ -197,19 +149,15 @@ export const usePeerGame = () => {
     };
     return {
       ...state,
-      logs: [newLog, ...state.logs].slice(0, 100), // Keep last 100 logs
+      logs: [newLog, ...state.logs].slice(0, 100),
     };
   };
 
-  // Broadcaster for host to send state updates to all clients
   const broadcastState = (fullState: GameState) => {
     trueGameStateRef.current = fullState;
-
-    // First update own host state (filtered for self so host can't cheat either!)
     const filteredHostState = filterStateForPlayer(fullState, myPlayerIdRef.current);
     setGameState(filteredHostState);
 
-    // Send filtered state to each connected peer
     Object.entries(connectionsRef.current).forEach(([pId, conn]) => {
       if (conn && conn.open) {
         try {
@@ -219,28 +167,24 @@ export const usePeerGame = () => {
           console.warn(`Не удалось отправить состояние игроку ${pId}:`, e);
         }
       } else {
-        // Cleanup closed connections
         delete connectionsRef.current[pId];
       }
     });
   };
 
-  // HOST: Initialize Room
   const createRoom = async (playerName: string) => {
     setConnectionStatus('connecting');
     const code = generateRoomCode();
     setRoomCode(code);
     setIsHost(true);
 
-    const iceServers = await fetchIceServers();
     const fullPeerId = `saboteur-room-${code}`;
-    const newPeer = new Peer(fullPeerId, getPeerConfig(iceServers));
+    const newPeer = new Peer(fullPeerId, getPeerConfig([]));
 
     newPeer.on('open', (id) => {
       setPeerId(id);
       setConnectionStatus('connected');
 
-      // Create initial host game state
       const hostPlayerId = Math.random().toString(36).substring(2, 9);
       myPlayerIdRef.current = hostPlayerId;
 
@@ -252,41 +196,23 @@ export const usePeerGame = () => {
         brokenTools: [],
         hand: [],
         handSize: 0,
+        maxHandSize: 6,
         score: 0,
+        goldResources: 3, // Старт с 3 золота
         active: true,
       };
 
       const initialGoals = getGoalTemplates().map((g, idx) => {
         const yCoord = (idx - 1) * 2;
-        return {
-          x: 8,
-          y: yCoord,
-          isGold: g.isGold,
-          flipped: false,
-          card: g.card,
-        };
+        return { x: 8, y: yCoord, isGold: g.isGold, flipped: false, card: g.card };
       });
 
       const initialGrid: Record<string, PlacedCard> = {
-        '0,0': {
-          card: getEntranceCard(),
-          rotated: false,
-          x: 0,
-          y: 0,
-          isEntrance: true,
-          flipped: true,
-        },
+        '0,0': { card: getEntranceCard(), rotated: false, x: 0, y: 0, isEntrance: true, flipped: true },
       };
 
       initialGoals.forEach(g => {
-        initialGrid[`${g.x},${g.y}`] = {
-          card: g.card,
-          rotated: false,
-          x: g.x,
-          y: g.y,
-          isGoal: true,
-          flipped: false,
-        };
+        initialGrid[`${g.x},${g.y}`] = { card: g.card, rotated: false, x: g.x, y: g.y, isGoal: true, flipped: false };
       });
 
       const initialFullState: GameState = {
@@ -301,21 +227,19 @@ export const usePeerGame = () => {
         currentTurn: 0,
         hostId: hostPlayerId,
         goals: initialGoals,
+        unusedRoles: [],
         logs: [],
         goldCardCount: 28,
         revealedGoals: {},
+        revealedRoles: {},
       };
 
-      const stateWithLog = addLog(initialFullState, `Комната создана! Код для входа: ${code}`, 'success');
+      const stateWithLog = addLog(initialFullState, `Комната создана! Код: ${code}`, 'success');
       trueGameStateRef.current = stateWithLog;
       setGameState(filterStateForPlayer(stateWithLog, hostPlayerId));
     });
 
     newPeer.on('connection', (conn) => {
-      conn.on('open', () => {
-        // A client connected, wait for JOIN message
-      });
-
       conn.on('data', (data: any) => {
         if (!data || typeof data !== 'object') return;
         const msg = data as { type: string; payload?: any; senderId?: string };
@@ -326,82 +250,29 @@ export const usePeerGame = () => {
           handleNetworkAction(msg.senderId, msg as NetworkAction);
         }
       });
-
-      conn.on('close', () => {
-        handlePlayerDisconnect(conn.peer);
-      });
-
-      conn.on('error', () => {
-        handlePlayerDisconnect(conn.peer);
-      });
-    });
-
-    // Автоматическое переподключение хоста к сигнальному серверу при разрыве сокета
-    newPeer.on('disconnected', () => {
-      console.warn('Хост: Соединение с сигнальным сервером PeerJS разорвано. Попытка переподключения...');
-      const reconnectInterval = setInterval(() => {
-        if (newPeer.destroyed) {
-          clearInterval(reconnectInterval);
-          return;
-        }
-        if (newPeer.disconnected) {
-          newPeer.reconnect();
-        } else {
-          clearInterval(reconnectInterval);
-        }
-      }, 5000);
-    });
-
-    newPeer.on('error', (err) => {
-      console.error(err);
-      if (err.type === 'network') {
-        console.warn('Хост: Сетевая ошибка сигнального сервера, пробуем восстановить...');
-        if (!newPeer.destroyed && newPeer.disconnected) {
-          newPeer.reconnect();
-        }
-      } else {
-        setConnectionStatus('error');
-        setErrorMessage(`Ошибка PeerJS: ${err.type === 'unavailable-id' ? 'Код комнаты уже занят' : err.message}`);
-      }
+      conn.on('close', () => handlePlayerDisconnect(conn.peer));
     });
 
     setPeer(newPeer);
   };
 
-  // CLIENT: Join Room
   const joinRoom = async (code: string, playerName: string) => {
     setConnectionStatus('connecting');
     setRoomCode(code.toUpperCase());
     setIsHost(false);
 
-    const iceServers = await fetchIceServers();
-    const myPeerId = getSessionClientId(); // Используем sessionStorage ID для стабильного реконнекта
-    const newPeer = new Peer(myPeerId, getPeerConfig(iceServers));
+    const myPeerId = getSessionClientId();
+    const newPeer = new Peer(myPeerId, getPeerConfig([]));
 
-    // Функция подключения/переподключения к хосту через WebRTC Data Channel
     const connectToHost = (peerInstance: Peer, rCode: string, pName: string) => {
       const hostId = `saboteur-room-${rCode}`;
       const conn = peerInstance.connect(hostId, { reliable: true });
-      let pingInterval: any;
 
       conn.on('open', () => {
         setConnectionStatus('connected');
         setErrorMessage('');
-
-        // Сохраняем соединение
         connectionsRef.current[`host`] = conn;
-
-        // Отсылаем JOIN-пакет
         conn.send({ type: 'JOIN', payload: { name: pName } });
-
-        // Запуск Heartbeat (пинг каждые 15 сек) для предотвращения засыпания соединения
-        pingInterval = setInterval(() => {
-          if (conn.open) {
-            conn.send({ type: 'PING' });
-          } else {
-            clearInterval(pingInterval);
-          }
-        }, 15000);
       });
 
       conn.on('data', (data: any) => {
@@ -416,65 +287,23 @@ export const usePeerGame = () => {
       });
 
       conn.on('close', () => {
-        clearInterval(pingInterval);
-        console.warn('Клиент: Соединение с хостом закрыто. Попытка восстановить через 3 секунды...');
-        
-        // Переводим интерфейс в состояние загрузки, но не стираем локальную карту, чтобы не ломать экран
         setConnectionStatus('connecting');
-        setErrorMessage('Связь с сервером прервана. Пытаемся восстановить соединение...');
-
+        setErrorMessage('Потеря связи. Попытка переподключения...');
         setTimeout(() => {
-          if (!peerInstance.destroyed) {
-            connectToHost(peerInstance, rCode, pName);
-          }
+          if (!peerInstance.destroyed) connectToHost(peerInstance, rCode, pName);
         }, 3000);
-      });
-
-      conn.on('error', (err) => {
-        console.error('Ошибка WebRTC канала:', err);
-        conn.close();
       });
     };
 
-    newPeer.on('open', (myPeerId) => {
-      setPeerId(myPeerId);
-      myPlayerIdRef.current = myPeerId;
+    newPeer.on('open', (id) => {
+      setPeerId(id);
+      myPlayerIdRef.current = id;
       connectToHost(newPeer, code.toUpperCase(), playerName);
-    });
-
-    // Клиент: Автопереподключение к сигнальному серверу PeerJS при дисконнекте сокета
-    newPeer.on('disconnected', () => {
-      console.warn('Клиент: Соединение с сигнальным сервером PeerJS разорвано. Восстановление...');
-      const reconnectInterval = setInterval(() => {
-        if (newPeer.destroyed) {
-          clearInterval(reconnectInterval);
-          return;
-        }
-        if (newPeer.disconnected) {
-          newPeer.reconnect();
-        } else {
-          clearInterval(reconnectInterval);
-        }
-      }, 5000);
-    });
-
-    newPeer.on('error', (err) => {
-      console.error(err);
-      if (err.type === 'network') {
-        console.warn('Клиент: Сетевая ошибка сигнального сервера, пробуем восстановить...');
-        if (!newPeer.destroyed && newPeer.disconnected) {
-          newPeer.reconnect();
-        }
-      } else {
-        setConnectionStatus('error');
-        setErrorMessage(`Не удалось запустить PeerJS клиент: ${err.message}`);
-      }
     });
 
     setPeer(newPeer);
   };
 
-  // HOST HANDLERS
   const handleJoinAction = (conn: DataConnection, name: string) => {
     const fullState = trueGameStateRef.current;
     if (!fullState) return;
@@ -482,31 +311,21 @@ export const usePeerGame = () => {
     const clientId = conn.peer;
     const existing = fullState.players.find(p => p.id === clientId);
 
-    // Если игра запущена, то зайти могут только переподключающиеся старые игроки
     if (fullState.status !== 'lobby' && !existing) {
-      conn.send({ type: 'ERROR', payload: 'Игра уже началась. Вход новым игрокам закрыт.' });
+      conn.send({ type: 'ERROR', payload: 'Игра уже началась.' });
       conn.close();
       return;
     }
 
-    if (fullState.players.length >= 10 && !existing) {
-      conn.send({ type: 'ERROR', payload: 'Комната заполнена (макс. 10 игроков)' });
-      conn.close();
-      return;
-    }
-
-    // Обработка успешного реконнекта существующего игрока
     if (existing) {
       existing.active = true;
-      existing.name = name; // Обновляем имя в случае изменения
+      existing.name = name;
       connectionsRef.current[clientId] = conn;
-
-      let updatedState = addLog(fullState, `Игрок ${name} вернулся в игру!`, 'success');
+      let updatedState = addLog(fullState, `Игрок ${name} вернулся!`, 'success');
       broadcastState(updatedState);
       return;
     }
 
-    // Add new player (only in lobby)
     const newPlayer: Player = {
       id: clientId,
       name,
@@ -515,18 +334,15 @@ export const usePeerGame = () => {
       brokenTools: [],
       hand: [],
       handSize: 0,
+      maxHandSize: 6,
       score: 0,
+      goldResources: 3,
       active: true,
     };
 
     connectionsRef.current[clientId] = conn;
-
-    let updatedState = {
-      ...fullState,
-      players: [...fullState.players, newPlayer],
-    };
-
-    updatedState = addLog(updatedState, `Игрок ${name} присоединился к игре`, 'info');
+    let updatedState = { ...fullState, players: [...fullState.players, newPlayer] };
+    updatedState = addLog(updatedState, `${name} вошел в лобби`, 'info');
     broadcastState(updatedState);
   };
 
@@ -534,40 +350,74 @@ export const usePeerGame = () => {
     const fullState = trueGameStateRef.current;
     if (!fullState) return;
 
-    // Find the player ID using peerId
-    let player = fullState.players.find(p => p.id === peerId);
-    if (!player) {
-      // Find inside connection dictionary
-      const matchingEntry = Object.entries(connectionsRef.current).find(([_, conn]) => (conn as any).peer === peerId);
-      if (matchingEntry) {
-        player = fullState.players.find(p => p.id === matchingEntry[0]);
-      }
-    }
-
+    const player = fullState.players.find(p => p.id === peerId);
     if (!player) return;
 
     player.active = false;
-    
-    // Удаляем неактивную сессию из списка рассылки
     delete connectionsRef.current[player.id];
-
     let updatedState = addLog(fullState, `Игрок ${player.name} отключился`, 'warning');
     broadcastState(updatedState);
   };
 
-  // Authoritative action processing on Host
+  // Механика Крестики-нолики & Колесо фортуны на Хосте
+  const startTTTTimer = () => {
+    if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+    tttTimerIntervalRef.current = setInterval(() => {
+      const fullState = trueGameStateRef.current;
+      if (!fullState || !fullState.tttState || !fullState.tttState.active) {
+        clearInterval(tttTimerIntervalRef.current);
+        return;
+      }
+
+      const ttt = fullState.tttState;
+      if (ttt.winnerId || ttt.isSpinningWheel) return;
+
+      if (ttt.timeLeft > 1) {
+        ttt.timeLeft -= 1;
+        broadcastState(fullState);
+      } else {
+        // Время вышло -> Запускаем Колесо Фортуны
+        ttt.timeLeft = 0;
+        ttt.isSpinningWheel = true;
+        let updated = addLog(fullState, `Время дуэли истекло! Запуск Колеса Фортуны!`, 'warning');
+        broadcastState(updated);
+
+        setTimeout(() => {
+          resolveTTTWheel();
+        }, 3000);
+      }
+    }, 1000);
+  };
+
+  const resolveTTTWheel = () => {
+    const fullState = trueGameStateRef.current;
+    if (!fullState || !fullState.tttState) return;
+
+    const ttt = fullState.tttState;
+    const loserChoice = Math.random() < 0.5 ? ttt.challengerId : ttt.targetId;
+    const winnerChoice = loserChoice === ttt.challengerId ? ttt.targetId : ttt.challengerId;
+
+    ttt.isSpinningWheel = false;
+    ttt.winnerId = winnerChoice;
+
+    const winner = fullState.players.find(p => p.id === winnerChoice);
+    const loser = fullState.players.find(p => p.id === loserChoice);
+
+    if (winner && loser) {
+      winner.goldResources += 3;
+      loser.brokenTools = ['lamp', 'cart', 'pickaxe'];
+      let updated = addLog(fullState, `🎡 Колесо выбрало проигравшим ${loser.name}! Все его инструменты сломаны. ${winner.name} получил 3 золота!`, 'success');
+      ttt.active = false;
+      updated.tttState = undefined;
+      broadcastState(nextTurn(updated));
+    }
+  };
+
   const handleNetworkAction = (senderId: string, action: NetworkAction) => {
     const fullState = trueGameStateRef.current;
     if (!fullState) return;
 
-    // Игнорируем Heartbeat-сообщения от клиентов
-    if (action.type === 'PING' as any) {
-      return;
-    }
-
-    // Host or Client triggers
     let updatedState = { ...fullState };
-
     const playerIndex = updatedState.players.findIndex(p => p.id === senderId);
     if (playerIndex === -1 && action.type !== 'JOIN') return;
     const player = updatedState.players[playerIndex];
@@ -575,12 +425,6 @@ export const usePeerGame = () => {
     switch (action.type) {
       case 'START_GAME': {
         if (senderId !== updatedState.hostId) return;
-        if (updatedState.players.length < 2) {
-          updatedState = addLog(updatedState, 'Для начала игры нужно как минимум 2 игрока!', 'error');
-          broadcastState(updatedState);
-          return;
-        }
-
         updatedState = startRound(updatedState, 1);
         break;
       }
@@ -589,8 +433,11 @@ export const usePeerGame = () => {
         if (updatedState.status !== 'playing') return;
         if (updatedState.currentTurn !== playerIndex) return;
 
+        // Если идет массовый обвал или просмотр, блокируем постройку туннелей
+        if (updatedState.massActionState?.active && updatedState.massActionState.type !== 'double_tunnel') return;
+
         if (player.brokenTools.length > 0) {
-          updatedState = addLog(updatedState, `${player.name}: Нельзя играть карту туннеля с поломанным инструментом!`, 'error');
+          updatedState = addLog(updatedState, `${player.name}: Инструменты сломаны!`, 'error');
           broadcastState(updatedState);
           return;
         }
@@ -602,35 +449,46 @@ export const usePeerGame = () => {
 
         const validation = validateTunnelPlacement(updatedState.grid, card, x, y, rotated);
         if (!validation.valid) {
-          updatedState = addLog(updatedState, `${player.name}: Ошибка хода! ${validation.reason}`, 'error');
+          updatedState = addLog(updatedState, `Ошибка: ${validation.reason}`, 'error');
           broadcastState(updatedState);
           return;
         }
 
-        const newPlaced: PlacedCard = {
-          card,
-          rotated,
-          x,
-          y,
-        };
-
-        updatedState.grid[`${x},${y}`] = newPlaced;
+        updatedState.grid[`${x},${y}`] = { card, rotated, x, y };
         player.hand.splice(cardIndex, 1);
         player.handSize = player.hand.length;
 
-        updatedState = addLog(updatedState, `${player.name} построил туннель на (${x}, ${y})`, 'info');
+        updatedState = addLog(updatedState, `${player.name} проложил туннель на (${x}, ${y})`, 'info');
 
-        if (updatedState.deck.length > 0) {
-          const drawn = updatedState.deck.pop()!;
-          player.hand.push(drawn);
+        // Обработка массового действия (Двойной туннель)
+        if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_tunnel') {
+          updatedState.massActionState.tunnelsPlaced += 1;
+          if (updatedState.massActionState.tunnelsPlaced >= 2) {
+            // Лимит уменьшается на 1 карту перманентно
+            player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+            updatedState = addLog(updatedState, `Массовый ход завершен! Максимум руки ${player.name} уменьшен до ${player.maxHandSize}`, 'warning');
+            
+            // Восполнение до нового лимита рук
+            while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+              player.hand.push(updatedState.deck.pop()!);
+            }
+            player.handSize = player.hand.length;
+            updatedState.deckCount = updatedState.deck.length;
+
+            updatedState.massActionState = undefined;
+            updatedState = checkGoalReveal(updatedState, senderId);
+            if (updatedState.status === 'playing') updatedState = nextTurn(updatedState);
+          }
+        } else {
+          // Обычный ход
+          if (updatedState.deck.length > 0) {
+            player.hand.push(updatedState.deck.pop()!);
+          }
           player.handSize = player.hand.length;
-        }
-        updatedState.deckCount = updatedState.deck.length;
+          updatedState.deckCount = updatedState.deck.length;
 
-        updatedState = checkGoalReveal(updatedState, senderId);
-
-        if (updatedState.status === 'playing') {
-          updatedState = nextTurn(updatedState);
+          updatedState = checkGoalReveal(updatedState, senderId);
+          if (updatedState.status === 'playing') updatedState = nextTurn(updatedState);
         }
         break;
       }
@@ -646,158 +504,289 @@ export const usePeerGame = () => {
 
         const targetPlayer = updatedState.players.find(p => p.id === targetPlayerId);
 
+        // Поломка
         if (card.actionType === 'break_tool') {
           if (!targetPlayer || !card.toolType) return;
-          if (targetPlayer.brokenTools.includes(card.toolType)) {
-            updatedState = addLog(updatedState, `Инструмент уже сломан у ${targetPlayer.name}`, 'error');
-            broadcastState(updatedState);
-            return;
-          }
-
+          if (targetPlayer.brokenTools.includes(card.toolType)) return;
           targetPlayer.brokenTools.push(card.toolType);
           player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
           updatedState.discardPile.push(card);
-
-          const toolName = card.toolType === 'lamp' ? 'фонарь' : card.toolType === 'cart' ? 'вагонетку' : 'кирку';
-          updatedState = addLog(updatedState, `${player.name} сломал ${toolName} игроку ${targetPlayer.name}`, 'warning');
-
+          updatedState = addLog(updatedState, `${player.name} сломал инструмент ${targetPlayer.name}`, 'warning');
+          
+        // Починка
         } else if (card.actionType === 'repair_tool') {
           if (!targetPlayer) return;
-          let repairTool: ToolType | undefined;
-
-          if (card.toolType) {
-            repairTool = card.toolType;
-          } else if (card.repairTypes && toolToRepair) {
-            if (card.repairTypes.includes(toolToRepair)) {
-              repairTool = toolToRepair;
-            }
-          }
-
-          if (!repairTool || !targetPlayer.brokenTools.includes(repairTool)) {
-            updatedState = addLog(updatedState, `Невозможно починить этот инструмент у ${targetPlayer.name}`, 'error');
-            broadcastState(updatedState);
-            return;
-          }
-
+          let repairTool = card.toolType || toolToRepair;
+          if (!repairTool || !targetPlayer.brokenTools.includes(repairTool)) return;
           targetPlayer.brokenTools = targetPlayer.brokenTools.filter(t => t !== repairTool);
           player.hand.splice(cardIndex, 1);
+          updatedState.discardPile.push(card);
+          updatedState = addLog(updatedState, `${player.name} починил инструмент ${targetPlayer.name}`, 'success');
+
+        // Просмотр роли (SAB2)
+        } else if (card.actionType === 'view_role') {
+          if (!targetPlayer) return;
+          updatedState.revealedRoles[`${targetPlayer.id}_${senderId}`] = true;
+          player.hand.splice(cardIndex, 1);
+          updatedState.discardPile.push(card);
+          updatedState = addLog(updatedState, `${player.name} тайно узнал роль ${targetPlayer.name}`, 'info');
+
+        // Смена роли (SAB2)
+        } else if (card.actionType === 'swap_roles') {
+          const tPlayer = targetPlayer || player;
+          if (updatedState.unusedRoles.length > 0) {
+            const oldRole = tPlayer.role;
+            const newRole = updatedState.unusedRoles.pop()!;
+            tPlayer.role = newRole;
+            if (oldRole) updatedState.unusedRoles.push(oldRole);
+            // Перемешиваем пул неиспользуемых ролей
+            updatedState.unusedRoles.sort(() => Math.random() - 0.5);
+
+            player.hand.splice(cardIndex, 1);
+            updatedState.discardPile.push(card);
+            updatedState = addLog(updatedState, `${player.name} инициировал смену роли для ${tPlayer.name}`, 'warning');
+          }
+
+        // Обмен картами (SAB2)
+        } else if (card.actionType === 'swap_cards') {
+          if (!targetPlayer || targetPlayer.id === senderId) return;
+          const tempHand = [...player.hand];
+          // Карту обмена изымаем перед обменом
+          tempHand.splice(cardIndex, 1);
+
+          player.hand = [...targetPlayer.hand];
+          targetPlayer.hand = tempHand;
+
           player.handSize = player.hand.length;
+          targetPlayer.handSize = targetPlayer.hand.length;
+
+          updatedState.discardPile.push(card);
+          updatedState = addLog(updatedState, `${player.name} совершил обмен картами с ${targetPlayer.name}!`, 'warning');
+
+        // Дуэль в Крестики-нолики
+        } else if (card.actionType === 'tic_tac_toe') {
+          if (!targetPlayer || targetPlayer.id === senderId) return;
+          player.hand.splice(cardIndex, 1);
           updatedState.discardPile.push(card);
 
-          const toolName = repairTool === 'lamp' ? 'фонарь' : repairTool === 'cart' ? 'вагонетку' : 'кирку';
-          updatedState = addLog(updatedState, `${player.name} починил ${toolName} игроку ${targetPlayer.name}`, 'success');
+          updatedState.tttState = {
+            active: true,
+            challengerId: senderId,
+            targetId: targetPlayer.id,
+            board: Array(9).fill(null),
+            currentTurnId: senderId,
+            timeLimit: card.tttDuration || 15,
+            timeLeft: card.tttDuration || 15,
+          };
 
+          updatedState = addLog(updatedState, `⚔️ ${player.name} вызвал ${targetPlayer.name} на дуэль в Крестики-Нолики!`, 'error');
+          startTTTTimer();
+
+        // Обвал туннеля
         } else if (card.actionType === 'cave_in') {
           if (x === undefined || y === undefined) return;
           const targetCoord = `${x},${y}`;
           const targetPlaced = updatedState.grid[targetCoord];
 
-          if (!targetPlaced || targetPlaced.isEntrance || targetPlaced.isGoal) {
-            updatedState = addLog(updatedState, 'Нельзя взорвать эту ячейку', 'error');
-            broadcastState(updatedState);
-            return;
-          }
+          if (!targetPlaced || targetPlaced.isEntrance || targetPlaced.isGoal) return;
 
           delete updatedState.grid[targetCoord];
           player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
           updatedState.discardPile.push(card);
-
           updatedState = addLog(updatedState, `${player.name} устроил обвал на (${x}, ${y})`, 'warning');
 
-        } else if (card.actionType === 'map') {
-          if (x === undefined || y === undefined) return;
-          const targetGoal = updatedState.goals.find(g => g.x === x && g.y === y);
-          if (!targetGoal || targetGoal.flipped) {
-            updatedState = addLog(updatedState, 'Карта цели уже открыта или не существует', 'error');
+          // Учет массового хода (Двойной обвал)
+          if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_cave_in') {
+            updatedState.massActionState.caveInsDone += 1;
+            if (updatedState.massActionState.caveInsDone >= 2) {
+              player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+              updatedState = addLog(updatedState, `Массовый обвал завершен! Лимит руки уменьшен до ${player.maxHandSize}`, 'warning');
+              
+              while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                player.hand.push(updatedState.deck.pop()!);
+              }
+              player.handSize = player.hand.length;
+              updatedState.deckCount = updatedState.deck.length;
+
+              updatedState.massActionState = undefined;
+              if (updatedState.status === 'playing') updatedState = nextTurn(updatedState);
+            }
             broadcastState(updatedState);
             return;
           }
 
+        // Карта просмотра
+        } else if (card.actionType === 'map') {
+          if (x === undefined || y === undefined) return;
+          const targetGoal = updatedState.goals.find(g => g.x === x && g.y === y);
+          if (!targetGoal || targetGoal.flipped) return;
+
           updatedState.revealedGoals[`${x},${y}_${senderId}`] = true;
           player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
           updatedState.discardPile.push(card);
+          updatedState = addLog(updatedState, `${player.name} тайно подсмотрел цель`, 'info');
 
-          updatedState = addLog(updatedState, `${player.name} тайно посмотрел карту цели`, 'info');
+          // Учет массового хода (Двойной просмотр)
+          if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_map') {
+            updatedState.massActionState.mapsViewed += 1;
+            if (updatedState.massActionState.mapsViewed >= 2) {
+              // БЕЗ уменьшения лимита карт
+              while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                player.hand.push(updatedState.deck.pop()!);
+              }
+              player.handSize = player.hand.length;
+              updatedState.deckCount = updatedState.deck.length;
+
+              updatedState.massActionState = undefined;
+              if (updatedState.status === 'playing') updatedState = nextTurn(updatedState);
+            }
+            broadcastState(updatedState);
+            return;
+          }
         }
 
-        if (updatedState.deck.length > 0) {
-          const drawn = updatedState.deck.pop()!;
-          player.hand.push(drawn);
-          player.handSize = player.hand.length;
+        // Автодобор обычного хода
+        if (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+          player.hand.push(updatedState.deck.pop()!);
         }
+        player.handSize = player.hand.length;
         updatedState.deckCount = updatedState.deck.length;
 
         updatedState = nextTurn(updatedState);
+        break;
+      }
+
+      case 'ACTIVATE_MASS_ACTION': {
+        if (updatedState.status !== 'playing' || updatedState.currentTurn !== playerIndex) return;
+        const { type, cardId1, cardId2 } = action.payload;
+
+        if (type === 'double_tunnel') {
+          updatedState.massActionState = { active: true, type: 'double_tunnel', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+          updatedState = addLog(updatedState, `${player.name} готовит массовую постройку двух туннелей за -1 к лимиту руки`, 'warning');
+        } else if (type === 'double_cave_in' && cardId1 && cardId2) {
+          // Изымаем карту обвала и карту пожертвования
+          const idx1 = player.hand.findIndex(c => c.id === cardId1);
+          const idx2 = player.hand.findIndex(c => c.id === cardId2);
+          if (idx1 !== -1 && idx2 !== -1) {
+            player.hand.splice(Math.max(idx1, idx2), 1);
+            player.hand.splice(Math.min(idx1, idx2), 1);
+            player.handSize = player.hand.length;
+
+            updatedState.massActionState = { active: true, type: 'double_cave_in', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+            updatedState = addLog(updatedState, `${player.name} пожертвовал картой и активировал Двойной Обвал (кликните по 2 туннелям)`, 'warning');
+          }
+        } else if (type === 'double_map' && cardId1 && cardId2) {
+          const idx1 = player.hand.findIndex(c => c.id === cardId1);
+          const idx2 = player.hand.findIndex(c => c.id === cardId2);
+          if (idx1 !== -1 && idx2 !== -1) {
+            player.hand.splice(Math.max(idx1, idx2), 1);
+            player.hand.splice(Math.min(idx1, idx2), 1);
+            player.handSize = player.hand.length;
+
+            updatedState.massActionState = { active: true, type: 'double_map', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+            updatedState = addLog(updatedState, `${player.name} сыграл 2 Секретных карты (выберите 2 цели на поле)`, 'info');
+          }
+        }
+        break;
+      }
+
+      case 'CONFIRM_MASS_ACTION': {
+        // Кнопка подтверждения прерывает серию шагов раньше времени
+        if (!updatedState.massActionState || updatedState.currentTurn !== playerIndex) return;
+        const m = updatedState.massActionState;
+
+        if (m.type === 'double_tunnel' || m.type === 'double_cave_in') {
+          player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+        }
+
+        while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+          player.hand.push(updatedState.deck.pop()!);
+        }
+        player.handSize = player.hand.length;
+        updatedState.deckCount = updatedState.deck.length;
+
+        updatedState.massActionState = undefined;
+        updatedState = nextTurn(updatedState);
+        break;
+      }
+
+      case 'TRANSFORM_CARD': {
+        const { cardId, targetType, cost } = action.payload;
+        if (player.goldResources < cost) return;
+
+        const cardIdx = player.hand.findIndex(c => c.id === cardId);
+        if (cardIdx === -1) return;
+
+        const check = canTransformCard(player.hand[cardIdx], targetType, player.goldResources);
+        if (check.can) {
+          player.goldResources -= cost;
+          player.hand[cardIdx] = transformCard(player.hand[cardIdx], targetType);
+          updatedState = addLog(updatedState, `${player.name} потратил ${cost} золота на преобразование карты в руке`, 'success');
+        }
+        break;
+      }
+
+      case 'TTT_MOVE': {
+        if (!updatedState.tttState) return;
+        const ttt = updatedState.tttState;
+        if (ttt.currentTurnId !== senderId) return;
+
+        const { cellIndex } = action.payload;
+        if (ttt.board[cellIndex] !== null) return;
+
+        const mark = senderId === ttt.challengerId ? 'X' : 'O';
+        ttt.board[cellIndex] = mark;
+
+        const winnerMark = checkTTTWinner(ttt.board);
+        if (winnerMark) {
+          const winnerId = winnerMark === 'X' ? ttt.challengerId : ttt.targetId;
+          const loserId = winnerId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
+
+          const winner = updatedState.players.find(p => p.id === winnerId);
+          const loser = updatedState.players.find(p => p.id === loserId);
+
+          if (winner && loser) {
+            winner.goldResources += 3;
+            loser.brokenTools = ['lamp', 'cart', 'pickaxe'];
+            updatedState = addLog(updatedState, `🎉 ${winner.name} победил в Крестики-Нолики! Получено 3 золота. У ${loser.name} сломаны все инструменты!`, 'success');
+          }
+
+          if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+          updatedState.tttState = undefined;
+          updatedState = nextTurn(updatedState);
+        } else if (isTTTBoardFull(ttt.board)) {
+          // Ничья -> Колесо фортуны
+          if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+          ttt.isSpinningWheel = true;
+          updatedState = addLog(updatedState, `Ничья! Запускается Колесо Фортуны!`, 'warning');
+          broadcastState(updatedState);
+
+          setTimeout(() => {
+            resolveTTTWheel();
+          }, 3000);
+          return;
+        } else {
+          ttt.currentTurnId = senderId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
+        }
         break;
       }
 
       case 'DISCARD': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
-
+        if (updatedState.status !== 'playing' || updatedState.currentTurn !== playerIndex) return;
         const { cardIds } = action.payload;
         if (!cardIds || cardIds.length === 0) return;
 
-        const validCardIds = cardIds.filter(id => player.hand.some(c => c.id === id));
-        if (validCardIds.length === 0) return;
-
-        validCardIds.forEach(id => {
+        cardIds.forEach(id => {
           const cardIndex = player.hand.findIndex(c => c.id === id);
           if (cardIndex !== -1) {
-            const discardedCard = player.hand.splice(cardIndex, 1)[0];
-            updatedState.discardPile.push(discardedCard);
-          }
-        });
-        player.handSize = player.hand.length;
-
-        updatedState = addLog(updatedState, `${player.name} сбросил карт: ${validCardIds.length}`, 'info');
-
-        for (let i = 0; i < validCardIds.length; i++) {
-          if (updatedState.deck.length > 0) {
-            const drawn = updatedState.deck.pop()!;
-            player.hand.push(drawn);
-          }
-        }
-        player.handSize = player.hand.length;
-        updatedState.deckCount = updatedState.deck.length;
-
-        updatedState = nextTurn(updatedState);
-        break;
-      }
-
-      case 'REPAIR_SELF_WITH_DISCARD': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
-
-        const { cardIds, toolToRepair } = action.payload;
-        if (!cardIds || cardIds.length !== 2) return;
-
-        const toolIdx = player.brokenTools.indexOf(toolToRepair);
-        if (toolIdx === -1) return;
-
-        const validCardIds = cardIds.filter(id => player.hand.some(c => c.id === id));
-        if (validCardIds.length !== 2) return;
-
-        validCardIds.forEach(id => {
-          const cardIndex = player.hand.findIndex(c => c.id === id);
-          if (cardIndex !== -1) {
-            const discardedCard = player.hand.splice(cardIndex, 1)[0];
-            updatedState.discardPile.push(discardedCard);
+            updatedState.discardPile.push(player.hand.splice(cardIndex, 1)[0]);
           }
         });
 
-        player.brokenTools.splice(toolIdx, 1);
-        player.handSize = player.hand.length;
+        updatedState = addLog(updatedState, `${player.name} сбросил карт: ${cardIds.length}`, 'info');
 
-        const toolNameRu = toolToRepair === 'lamp' ? 'Фонарь' : toolToRepair === 'cart' ? 'Вагонетку' : 'Кирку';
-        updatedState = addLog(updatedState, `${player.name} сбросил 2 карты и починил свой инструмент: ${toolNameRu}`, 'success');
-
-        if (updatedState.deck.length > 0) {
-          const drawn = updatedState.deck.pop()!;
-          player.hand.push(drawn);
+        while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+          player.hand.push(updatedState.deck.pop()!);
         }
         player.handSize = player.hand.length;
         updatedState.deckCount = updatedState.deck.length;
@@ -816,7 +805,6 @@ export const usePeerGame = () => {
         if (senderId !== updatedState.hostId) return;
         if (updatedState.round >= 3) {
           updatedState.status = 'game_end';
-          updatedState = addLog(updatedState, 'Игра завершена по итогам 3-х раундов!', 'success');
         } else {
           updatedState = startRound(updatedState, updatedState.round + 1);
         }
@@ -834,99 +822,63 @@ export const usePeerGame = () => {
     broadcastState(updatedState);
   };
 
-  // Core start round function
   const startRound = (state: GameState, roundNum: number): GameState => {
     let updated = { ...state };
     updated.status = 'playing';
     updated.round = roundNum;
     updated.discardPile = [];
     updated.revealedGoals = {};
+    updated.revealedRoles = {};
     updated.winnerTeam = undefined;
-    updated.roundGoldReward = undefined;
 
     updated.players.forEach(p => {
       p.brokenTools = [];
       p.hand = [];
-      p.handSize = 0;
-      p.isWinnerOfRound = false;
+      p.maxHandSize = 6;
+      p.goldResources = 3; // Каждому 3 золота на раунд
     });
 
-    const freshDeck = createFullDeck();
-    updated.deck = freshDeck;
+    updated.deck = createFullDeck();
 
     const goalsList = getGoalTemplates().map((g, idx) => {
-      const yCoord = (idx - 1) * 2;
-      return {
-        x: 8,
-        y: yCoord,
-        isGold: g.isGold,
-        flipped: false,
-        card: g.card,
-      };
+      return { x: 8, y: (idx - 1) * 2, isGold: g.isGold, flipped: false, card: g.card };
     });
     updated.goals = goalsList;
 
     const initialGrid: Record<string, PlacedCard> = {
-      '0,0': {
-        card: getEntranceCard(),
-        rotated: false,
-        x: 0,
-        y: 0,
-        isEntrance: true,
-        flipped: true,
-      },
+      '0,0': { card: getEntranceCard(), rotated: false, x: 0, y: 0, isEntrance: true, flipped: true },
     };
-
     goalsList.forEach(g => {
-      initialGrid[`${g.x},${g.y}`] = {
-        card: g.card,
-        rotated: false,
-        x: g.x,
-        y: g.y,
-        isGoal: true,
-        flipped: false,
-      };
+      initialGrid[`${g.x},${g.y}`] = { card: g.card, rotated: false, x: g.x, y: g.y, isGoal: true, flipped: false };
     });
     updated.grid = initialGrid;
 
+    // Пул ролей: золотоискатели, вредители и геологи
     const numPlayers = updated.players.length;
-    let saboteursCount = 1;
-    let minersCount = 3;
+    let sabs = 1;
+    let geologists = 1;
+    let miners = 2;
 
-    if (numPlayers === 4) { saboteursCount = 1; minersCount = 4; }
-    else if (numPlayers === 5) { saboteursCount = 2; minersCount = 4; }
-    else if (numPlayers === 6) { saboteursCount = 2; minersCount = 5; }
-    else if (numPlayers === 7) { saboteursCount = 3; minersCount = 5; }
-    else if (numPlayers === 8) { saboteursCount = 3; minersCount = 6; }
-    else if (numPlayers === 9) { saboteursCount = 3; minersCount = 7; }
-    else if (numPlayers >= 10) { saboteursCount = 4; minersCount = 7; }
-    else {
-      saboteursCount = 1;
-      minersCount = 2;
-    }
+    if (numPlayers >= 6) { sabs = 2; geologists = 2; miners = 3; }
+    else if (numPlayers >= 8) { sabs = 3; geologists = 2; miners = 4; }
 
-    const roles: ('miner' | 'saboteur')[] = [];
-    for (let i = 0; i < saboteursCount; i++) roles.push('saboteur');
-    for (let i = 0; i < minersCount; i++) roles.push('miner');
+    const rolesPool: ('miner' | 'saboteur' | 'geologist')[] = [];
+    for (let i = 0; i < sabs; i++) rolesPool.push('saboteur');
+    for (let i = 0; i < geologists; i++) rolesPool.push('geologist');
+    for (let i = 0; i < miners; i++) rolesPool.push('miner');
 
-    for (let i = roles.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [roles[i], roles[j]] = [roles[j], roles[i]];
-    }
+    rolesPool.sort(() => Math.random() - 0.5);
 
     updated.players.forEach((p, idx) => {
-      p.role = roles[idx];
+      p.role = rolesPool[idx] || 'miner';
     });
 
-    let cardsPerHand = 6;
-    if (numPlayers >= 6 && numPlayers <= 7) cardsPerHand = 5;
-    else if (numPlayers >= 8) cardsPerHand = 4;
+    // Оставшиеся роли уходят в неиспользуемые (для смены роли)
+    updated.unusedRoles = rolesPool.slice(numPlayers);
 
     updated.players.forEach(p => {
-      for (let i = 0; i < cardsPerHand; i++) {
-        if (updated.deck.length > 0) {
-          p.hand.push(updated.deck.pop()!);
-        }
+      for (let i = 0; i < p.maxHandSize; i++) {
+        if (updated.deck.length > 0) p.hand.push(updated.deck.pop()!);
       }
       p.handSize = p.hand.length;
     });
@@ -934,8 +886,7 @@ export const usePeerGame = () => {
     updated.deckCount = updated.deck.length;
     updated.currentTurn = Math.floor(Math.random() * numPlayers);
 
-    updated = addLog(updated, `Раунд ${roundNum} начался! Роли розданы. Ход игрока: ${updated.players[updated.currentTurn].name}`, 'success');
-
+    updated = addLog(updated, `Раунд ${roundNum} начался! Каждому гному выдано 3 золота 🪙`, 'success');
     return updated;
   };
 
@@ -946,32 +897,24 @@ export const usePeerGame = () => {
 
     while (tries < updated.players.length) {
       const nextPlayer = updated.players[nextIdx];
-      if (nextPlayer.active && (nextPlayer.hand.length > 0 || updated.deck.length > 0)) {
+      if (nextPlayer.active) {
         updated.currentTurn = nextIdx;
         break;
       }
       nextIdx = (nextIdx + 1) % updated.players.length;
       tries++;
     }
-
-    const allHandsEmpty = updated.players.every(p => !p.active || p.hand.length === 0);
-    if (allHandsEmpty && updated.deck.length === 0) {
-      updated = endRoundWithWinners(updated, 'saboteurs');
-    }
-
     return updated;
   };
 
   const checkGoalReveal = (state: GameState, finisherId: string): GameState => {
     let updated = { ...state };
     const reachable = calculateReachability(updated.grid);
-
     let goldReached = false;
 
     updated.goals = updated.goals.map(g => {
       const key = `${g.x},${g.y}`;
       if (reachable.has(key) && !g.flipped) {
-        // Goal reached! Reveal it
         const flippedPlaced: PlacedCard = {
           card: g.card,
           rotated: false,
@@ -979,80 +922,74 @@ export const usePeerGame = () => {
           y: g.y,
           isGoal: true,
           flipped: true,
-          isGold: g.isGold, // Явно сохраняем флаг золота в ячейку поля
+          isGold: g.isGold,
         } as any;
         updated.grid[key] = flippedPlaced;
 
         if (g.isGold) {
           goldReached = true;
-          return { ...g, flipped: true };
         } else {
-          updated = addLog(updated, `Открыта шахта цели на (${g.x}, ${g.y}) — там обычный камень!`, 'warning');
-          return { ...g, flipped: true };
+          updated = addLog(updated, `Туннель вывел к пустышке на (${g.x}, ${g.y})`, 'warning');
         }
+        return { ...g, flipped: true };
       }
       return g;
     });
 
     if (goldReached) {
-      updated = addLog(updated, `Золото найдено! Шахтеры победили в раунде!`, 'success');
+      updated = addLog(updated, `Золотая жила найдена! Шахтеры празднуют победу!`, 'success');
       updated = endRoundWithWinners(updated, 'miners', finisherId);
     }
-
     return updated;
   };
 
-  const endRoundWithWinners = (state: GameState, team: 'miners' | 'saboteurs', finisherId?: string): GameState => {
+  const endRoundWithWinners = (state: GameState, team: 'miners' | 'saboteurs' | 'geologists', finisherId?: string): GameState => {
     let updated = { ...state };
     updated.status = 'round_end';
     updated.winnerTeam = team;
 
     const reward: Record<string, number> = {};
 
+    // 1. Начисление шахтерам/вредителям
     if (team === 'miners') {
-      const miners = updated.players.filter(p => p.role === 'miner');
-      miners.forEach(p => p.isWinnerOfRound = true);
-
-      const nuggetVals: number[] = [];
-      for (let i = 0; i < miners.length; i++) {
-        nuggetVals.push(Math.floor(Math.random() * 3) + 1);
-      }
-      nuggetVals.sort((a, b) => b - a);
-
-      let finisherIndex = miners.findIndex(p => p.id === finisherId);
-      if (finisherIndex === -1) finisherIndex = 0;
-
-      for (let i = 0; i < miners.length; i++) {
-        const minerIdx = (finisherIndex + i) % miners.length;
-        const playerObj = miners[minerIdx];
-        const val = nuggetVals[i] || 1;
-        playerObj.score += val;
-        reward[playerObj.id] = val;
-      }
-
-      updated = addLog(updated, `Распределение золота для гномов-искателей завершено!`, 'success');
+      const minersList = updated.players.filter(p => p.role === 'miner');
+      minersList.forEach(p => {
+        const rewardAmount = Math.floor(Math.random() * 3) + 2;
+        p.score += rewardAmount;
+        reward[p.id] = rewardAmount;
+      });
     } else {
-      const sabs = updated.players.filter(p => p.role === 'saboteur');
-      sabs.forEach(p => p.isWinnerOfRound = true);
+      const sabsList = updated.players.filter(p => p.role === 'saboteur');
+      sabsList.forEach(p => {
+        const rewardAmount = 4;
+        p.score += rewardAmount;
+        reward[p.id] = rewardAmount;
+      });
+    }
 
-      let valuePerSab = 3;
-      if (sabs.length === 1) valuePerSab = 4;
-      else if (sabs.length >= 4) valuePerSab = 2;
-      else if (sabs.length === 0) valuePerSab = 0;
-
-      sabs.forEach(p => {
-        p.score += valuePerSab;
-        reward[p.id] = valuePerSab;
+    // 2. Расчет очков Геологам (подсчитываем кристаллы на поле)
+    const geologistsList = updated.players.filter(p => p.role === 'geologist');
+    if (geologistsList.length > 0) {
+      let crystalsCount = 0;
+      Object.values(updated.grid).forEach(cell => {
+        if (cell.card && cell.card.hasCrystal) {
+          crystalsCount++;
+        }
       });
 
-      updated = addLog(updated, `Вредители победили в раунде! Каждому вредителю начислено по ${valuePerSab} золота.`, 'warning');
+      const geologistReward = geologistsList.length > 0 ? Math.floor(crystalsCount / geologistsList.length) : 0;
+      geologistsList.forEach(p => {
+        p.score += geologistReward;
+        reward[p.id] = (reward[p.id] || 0) + geologistReward;
+      });
+
+      updated = addLog(updated, `💎 Геологи получают по ${geologistReward} золота за найденные кристаллы (${crystalsCount} шт. на поле)!`, 'success');
     }
 
     updated.roundGoldReward = reward;
     return updated;
   };
 
-  // CLIENT SENDER ACTION
   const clientSendAction = (action: NetworkAction) => {
     if (isHost) {
       handleNetworkAction(myPlayerIdRef.current, action);

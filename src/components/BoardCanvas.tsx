@@ -1,3 +1,4 @@
+// src/components/BoardCanvas.tsx
 import React, { useRef, useEffect, useState } from 'react';
 import { Flame, Eye } from 'lucide-react';
 import { GameState, PlacedCard, NetworkAction } from '../types';

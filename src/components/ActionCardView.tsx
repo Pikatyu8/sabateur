@@ -1,7 +1,7 @@
 // src/components/ActionCardView.tsx
 import React from 'react';
 import { ActionCard, ToolType } from '../types';
-import { ShieldAlert, ShieldCheck, HelpCircle, Flame, Eye, ShoppingCart, Lightbulb, Hammer } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, HelpCircle, Flame, Eye, ShoppingCart, Lightbulb, Hammer, Users, RefreshCw, Trophy } from 'lucide-react';
 
 interface ActionCardViewProps {
   card: ActionCard;
@@ -14,116 +14,59 @@ export const ActionCardView: React.FC<ActionCardViewProps> = ({
   isSelected = false,
   onClick,
 }) => {
-  // Base card styling
-  const selectClass = isSelected ? 'scale-105 ring-2 ring-amber-400 shadow-lg shadow-amber-400/30' : 'hover:scale-[1.02] shadow-md';
+  const selectClass = isSelected ? 'scale-105 ring-2 ring-amber-400 shadow-lg' : 'hover:scale-[1.02] shadow-md';
 
-  // Helper to get the correct tool icon
-  const getToolIcon = (tool?: ToolType, sizeClass = 'w-8 h-8') => {
-    if (tool === 'lamp') return <Lightbulb className={sizeClass} />;
-    if (tool === 'cart') return <ShoppingCart className={sizeClass} />;
-    return <Hammer className={sizeClass} />; // pickaxe fallback
+  const getToolIcon = (tool?: ToolType) => {
+    if (tool === 'lamp') return <Lightbulb className="w-8 h-8" />;
+    if (tool === 'cart') return <ShoppingCart className="w-8 h-8" />;
+    return <Hammer className="w-8 h-8" />;
   };
 
-  const getToolNameRu = (tool?: ToolType) => {
-    if (tool === 'lamp') return 'Фонарь';
-    if (tool === 'cart') return 'Вагонетка';
-    return 'Кирка';
-  };
+  const wrapCard = (bg: string, label: string, icon: React.ReactNode, sub: string) => (
+    <div
+      className={`relative w-16 h-24 rounded-lg bg-gradient-to-br ${bg} border p-1 select-none flex flex-col justify-between items-center transition-all cursor-pointer ${selectClass}`}
+      onClick={onClick}
+    >
+      <span className="text-[8px] font-bold uppercase tracking-widest text-center">{label}</span>
+      <div className="relative my-1">{icon}</div>
+      <span className="text-[8px] font-mono text-center leading-none truncate max-w-full">{sub}</span>
+    </div>
+  );
 
-  // 1. BREAK TOOL CARD
   if (card.actionType === 'break_tool') {
-    return (
-      <div
-        id={`card-action-${card.id}`}
-        className={`relative w-16 h-24 rounded-lg bg-gradient-to-br from-red-950 via-stone-900 to-red-950 border border-red-800 p-1 select-none overflow-hidden flex flex-col justify-between items-center transition-all duration-200 cursor-pointer ${selectClass}`}
-        onClick={onClick}
-      >
-        <span className="text-[8px] text-red-500 font-bold uppercase tracking-widest text-center">СЛОМАТЬ</span>
-        <div className="relative my-1 text-red-500">
-          {getToolIcon(card.toolType)}
-          <ShieldAlert className="w-4 h-4 text-red-400 absolute -bottom-1 -right-1 bg-stone-900 rounded-full" />
-        </div>
-        <span className="text-[8px] text-red-300 font-mono text-center leading-none truncate max-w-full">
-          {getToolNameRu(card.toolType)}
-        </span>
-      </div>
-    );
+    return wrapCard('from-red-950 via-stone-900 to-red-950 border-red-800 text-red-500', 'СЛОМАТЬ', getToolIcon(card.toolType), card.toolType || 'Инструмент');
   }
 
-  // 2. REPAIR TOOL CARD
   if (card.actionType === 'repair_tool') {
-    const isMulti = !!card.repairTypes;
-    return (
-      <div
-        id={`card-action-${card.id}`}
-        className={`relative w-16 h-24 rounded-lg bg-gradient-to-br from-emerald-950 via-stone-900 to-emerald-950 border border-emerald-800 p-1 select-none overflow-hidden flex flex-col justify-between items-center transition-all duration-200 cursor-pointer ${selectClass}`}
-        onClick={onClick}
-      >
-        <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-widest text-center">ПОЧИНИТЬ</span>
-        <div className="relative my-1 text-emerald-400 flex gap-0.5">
-          {isMulti ? (
-            <div className="flex gap-0.5 items-center">
-              {card.repairTypes?.map(t => (
-                <div key={t} className="scale-75 -mx-1">
-                  {getToolIcon(t, 'w-6 h-6')}
-                </div>
-              ))}
-            </div>
-          ) : (
-            getToolIcon(card.toolType)
-          )}
-          <ShieldCheck className="w-4 h-4 text-emerald-300 absolute -bottom-1 -right-1 bg-stone-900 rounded-full" />
-        </div>
-        <span className="text-[8px] text-emerald-200 font-mono text-center leading-none truncate max-w-full">
-          {isMulti ? 'Двойная' : getToolNameRu(card.toolType)}
-        </span>
-      </div>
-    );
+    return wrapCard('from-emerald-950 via-stone-900 to-emerald-950 border-emerald-800 text-emerald-400', 'ПОЧИНИТЬ', getToolIcon(card.toolType), 'Ремонт');
   }
 
-  // 3. CAVE-IN CARD (ОБВАЛ)
   if (card.actionType === 'cave_in') {
-    return (
-      <div
-        id={`card-action-${card.id}`}
-        className={`relative w-16 h-24 rounded-lg bg-gradient-to-br from-amber-950 via-stone-900 to-amber-900 border border-amber-600 p-1 select-none overflow-hidden flex flex-col justify-between items-center transition-all duration-200 cursor-pointer ${selectClass}`}
-        onClick={onClick}
-      >
-        <span className="text-[8px] text-amber-500 font-bold uppercase tracking-widest text-center">ОБВАЛ</span>
-        <div className="relative my-1 text-amber-500">
-          <Flame className="w-8 h-8 animate-pulse text-amber-500" />
-        </div>
-        <span className="text-[8px] text-amber-200 font-mono text-center leading-none truncate max-w-full">
-          Взрыв туннеля
-        </span>
-      </div>
-    );
+    return wrapCard('from-amber-950 via-stone-900 to-amber-900 border-amber-600 text-amber-500', 'ОБВАЛ', <Flame className="w-8 h-8" />, 'Взрыв');
   }
 
-  // 4. MAP CARD (КАРТА)
   if (card.actionType === 'map') {
-    return (
-      <div
-        id={`card-action-${card.id}`}
-        className={`relative w-16 h-24 rounded-lg bg-gradient-to-br from-sky-950 via-stone-900 to-indigo-950 border border-sky-800 p-1 select-none overflow-hidden flex flex-col justify-between items-center transition-all duration-200 cursor-pointer ${selectClass}`}
-        onClick={onClick}
-      >
-        <span className="text-[8px] text-sky-400 font-bold uppercase tracking-widest text-center">КАРТА</span>
-        <div className="relative my-1 text-sky-400">
-          <Eye className="w-8 h-8 text-sky-400" />
-        </div>
-        <span className="text-[8px] text-sky-200 font-mono text-center leading-none truncate max-w-full">
-          Узнать цель
-        </span>
-      </div>
-    );
+    return wrapCard('from-sky-950 via-stone-900 to-indigo-950 border-sky-800 text-sky-400', 'КАРТА', <Eye className="w-8 h-8" />, 'Узнать цель');
+  }
+
+  if (card.actionType === 'view_role') {
+    return wrapCard('from-indigo-950 via-stone-900 to-purple-950 border-indigo-800 text-indigo-400', 'РОЛЬ', <Users className="w-8 h-8" />, 'Узнать роль');
+  }
+
+  if (card.actionType === 'swap_roles') {
+    return wrapCard('from-pink-950 via-stone-900 to-rose-950 border-pink-800 text-pink-400', 'СМЕНА', <RefreshCw className="w-8 h-8 text-pink-400" />, 'Роль');
+  }
+
+  if (card.actionType === 'swap_cards') {
+    return wrapCard('from-teal-950 via-stone-900 to-emerald-950 border-teal-800 text-teal-400', 'ОБМЕН', <Users className="w-8 h-8 text-teal-400" />, 'Карты рук');
+  }
+
+  if (card.actionType === 'tic_tac_toe') {
+    return wrapCard('from-yellow-950 via-stone-900 to-amber-950 border-yellow-700 text-yellow-500', 'ДУЭЛЬ', <Trophy className="w-8 h-8" />, `${card.tttDuration} сек`);
   }
 
   return (
-    <div
-      className={`relative w-16 h-24 rounded-lg bg-stone-800 border border-stone-700 flex items-center justify-center cursor-pointer ${selectClass}`}
-      onClick={onClick}
-    >
+    <div className={`relative w-16 h-24 rounded-lg bg-stone-800 border flex items-center justify-center cursor-pointer ${selectClass}`} onClick={onClick}>
       <HelpCircle className="w-8 h-8 text-stone-500" />
     </div>
   );

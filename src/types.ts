@@ -13,17 +13,18 @@ export interface TunnelCard {
   };
   connectedParts: ('top' | 'right' | 'bottom' | 'left')[][];
   isLadder?: boolean;
-  hasCrystal?: boolean;
+  hasCrystal?: boolean; // Кристаллы для геологов
 }
 
 export interface ActionCard {
   id: string;
   type: 'action';
-  actionType: 'break_tool' | 'repair_tool' | 'cave_in' | 'map';
+  actionType: 'break_tool' | 'repair_tool' | 'cave_in' | 'map' | 'view_role' | 'swap_roles' | 'swap_cards' | 'tic_tac_toe';
   name: string;
   description: string;
-  toolType?: 'lamp' | 'cart' | 'pickaxe'; // For break_tool and simple repair_tool
-  repairTypes?: ('lamp' | 'cart' | 'pickaxe')[]; // For multi repair_tool
+  toolType?: 'lamp' | 'cart' | 'pickaxe'; // Для поломки и простого ремонта
+  repairTypes?: ('lamp' | 'cart' | 'pickaxe')[]; // Для двойного ремонта
+  tttDuration?: 15 | 30; // Время для дуэли в крестики-нолики
 }
 
 export type Card = TunnelCard | ActionCard;
@@ -36,7 +37,7 @@ export interface PlacedCard {
   isGoal?: boolean;
   isGold?: boolean;
   isEntrance?: boolean;
-  flipped?: boolean; // For goals: true means revealed
+  flipped?: boolean; // Открыта ли цель
 }
 
 export type ToolType = 'lamp' | 'cart' | 'pickaxe';
@@ -45,13 +46,15 @@ export interface Player {
   id: string;
   name: string;
   isHost: boolean;
-  role: 'miner' | 'saboteur' | null; // Null in lobby or hidden for other players
+  role: 'miner' | 'saboteur' | 'geologist' | null; // Геологи добавлены
   brokenTools: ToolType[];
-  hand: Card[]; // Hidden from other players in filtered state
-  handSize: number; // Disclosed to other players
-  score: number; // Gold nuggets
+  hand: Card[];
+  handSize: number;
+  maxHandSize: number; // Динамический лимит руки
+  score: number; // Общий счет в золоте (постоянный)
+  goldResources: number; // Расходуемое золото внутри раунда
   isWinnerOfRound?: boolean;
-  active: boolean; // Connection status
+  active: boolean;
 }
 
 export type GameStatus = 'lobby' | 'playing' | 'round_end' | 'game_end';
@@ -64,16 +67,39 @@ export interface LogEntry {
   playerName?: string;
 }
 
+// Состояние массового хода
+export interface MassActionState {
+  active: boolean;
+  type: 'double_tunnel' | 'double_cave_in' | 'double_map';
+  tunnelsPlaced: number;
+  caveInsDone: number;
+  mapsViewed: number;
+}
+
+// Состояние мини-игры Крестики-Нолики
+export interface TTTGameState {
+  active: boolean;
+  challengerId: string;
+  targetId: string;
+  board: (string | null)[]; // 9 клеток
+  currentTurnId: string;
+  timeLimit: number;
+  timeLeft: number;
+  winnerId?: string | 'draw';
+  isSpinningWheel?: boolean;
+  wheelWinnerId?: string;
+}
+
 export interface GameState {
   roomId: string;
   status: GameStatus;
-  round: number; // 1, 2, or 3
+  round: number; // 1, 2, 3
   players: Player[];
-  grid: Record<string, PlacedCard>; // key: "x,y"
+  grid: Record<string, PlacedCard>;
   deckCount: number;
-  deck: Card[]; // Secret, kept by host
+  deck: Card[];
   discardPile: Card[];
-  currentTurn: number; // index of player in players array
+  currentTurn: number;
   hostId: string;
   goals: {
     x: number;
@@ -82,14 +108,17 @@ export interface GameState {
     flipped: boolean;
     card: TunnelCard;
   }[];
+  unusedRoles: ('miner' | 'saboteur' | 'geologist')[]; // Пул неиспользуемых ролей
   logs: LogEntry[];
-  goldCardCount: number; // Remainder of gold cards
-  revealedGoals: Record<string, boolean>; // map of x,y -> true if current player knows it
-  winnerTeam?: 'miners' | 'saboteurs';
-  roundGoldReward?: Record<string, number>; // player ID -> gold reward
+  goldCardCount: number;
+  revealedGoals: Record<string, boolean>; // x,y_playerId -> true
+  revealedRoles: Record<string, boolean>; // targetPlayerId_viewerPlayerId -> true (просмотренные роли)
+  winnerTeam?: 'miners' | 'saboteurs' | 'geologists';
+  roundGoldReward?: Record<string, number>;
+  massActionState?: MassActionState; // Активное массовое действие
+  tttState?: TTTGameState; // Состояние дуэли в крестики-нолики
 }
 
-// Actions that can be sent from client to host
 export type NetworkAction =
   | { type: 'JOIN'; payload: { name: string } }
   | { type: 'START_GAME' }
@@ -99,4 +128,9 @@ export type NetworkAction =
   | { type: 'REPAIR_SELF_WITH_DISCARD'; payload: { cardIds: string[]; toolToRepair: ToolType } }
   | { type: 'SEND_CHAT'; payload: { message: string } }
   | { type: 'NEXT_ROUND' }
-  | { type: 'RESTART_GAME' };
+  | { type: 'RESTART_GAME' }
+  // Новые сетевые действия:
+  | { type: 'ACTIVATE_MASS_ACTION'; payload: { type: 'double_tunnel' | 'double_cave_in' | 'double_map'; cardId1?: string; cardId2?: string } }
+  | { type: 'CONFIRM_MASS_ACTION' }
+  | { type: 'TRANSFORM_CARD'; payload: { cardId: string; targetType: string; cost: number } }
+  | { type: 'TTT_MOVE'; payload: { cellIndex: number } };
