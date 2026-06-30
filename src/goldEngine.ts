@@ -1,101 +1,90 @@
-// src/gameEngine.ts (только обновленная функция validateTunnelPlacement)
-export const validateTunnelPlacement = (
-  grid: Record<string, PlacedCard>,
-  card: TunnelCard,
-  x: number,
-  y: number,
-  rotated: boolean,
-  precalculatedReachable?: Set<string> // Передаем кэш для O(1) проверки связи
-): { valid: boolean; reason?: string } => {
-  const key = `${x},${y}`;
+// src/goldEngine.ts
+import { Card, TunnelCard, ActionCard } from './types';
 
-  if (grid[key]) {
-    return { valid: false, reason: 'Здесь уже есть карта' };
-  }
-
-  if (x === 0 && y === 0) {
-    return { valid: false, reason: 'Нельзя строить на входе в шахту' };
-  }
-
-  const tempPlaced: PlacedCard = { card, rotated, x, y };
-  const tempInfo = getRotatedExitsAndConnections(tempPlaced);
-
-  const neighbors = [
-    { dir: 'top', nx: x, ny: y - 1 },
-    { dir: 'bottom', nx: x, ny: y + 1 },
-    { dir: 'left', nx: x - 1, ny: y },
-    { dir: 'right', nx: x + 1, ny: y },
-  ];
-
-  let hasNeighbor = false;
-  let matchesAllNeighbors = true;
-  let isConnectedToEntrance = false;
-
-  for (const { dir, nx, ny } of neighbors) {
-    const neighborKey = `${nx},${ny}`;
-    const neighbor = grid[neighborKey];
-
-    if (neighbor) {
-      hasNeighbor = true;
-
-      if (!neighbor.isGoal) {
-        const neighborInfo = getRotatedExitsAndConnections(neighbor);
-        const opposing = getOpposingDir(dir as any);
-
-        const myExit = tempInfo.exits[dir as any];
-        const neighborExit = neighborInfo.exits[opposing];
-
-        if (myExit !== neighborExit) {
-          matchesAllNeighbors = false;
-          break;
-        }
-
-        // Если сосед достижим и имеет проход к нам, а мы к нему — значит путь есть
-        if (precalculatedReachable && precalculatedReachable.has(neighborKey) && myExit && neighborExit) {
-          isConnectedToEntrance = true;
-        }
-      } else if (neighbor.isGoal && neighbor.flipped) {
-        // Достижение открытых целей
-        const neighborInfo = getRotatedExitsAndConnections(neighbor);
-        const opposing = getOpposingDir(dir as any);
-        if (tempInfo.exits[dir as any] && neighborInfo.exits[opposing]) {
-          isConnectedToEntrance = true;
-        }
-      }
+function canTransformCard(card: Card, targetType: string, playerGold: number): { can: boolean; cost: number } {
+  // Безопасное сужение типа для карт туннелей
+  if (card.type === 'tunnel') {
+    const tunnel = card as TunnelCard;
+    if (targetType === 'crystal_tunnel' && !tunnel.hasCrystal) {
+      return { can: playerGold >= 1, cost: 1 };
+    }
+    if (targetType === 'tunnel_to_cave_in') {
+      return { can: playerGold >= 2, cost: 2 };
     }
   }
 
-  if (!hasNeighbor) {
-    return { valid: false, reason: 'Карта должна примыкать к существующему туннелю' };
-  }
-
-  if (!matchesAllNeighbors) {
-    return { valid: false, reason: 'Туннели на стыке карт не совпадают' };
-  }
-
-  // Если у нас нет кэша, выполняем полный BFS (совместимость)
-  if (!precalculatedReachable) {
-    const tempGrid = { ...grid, [key]: tempPlaced };
-    const reached = calculateReachability(tempGrid);
-    if (!reached.has(key)) {
-      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+  // Безопасное сужение типа для карт действий
+  if (card.type === 'action') {
+    const action = card as ActionCard;
+    if (targetType === 'repair_to_break' && action.actionType === 'repair_tool') {
+      return { can: playerGold >= 1, cost: 1 };
     }
-  } else if (!isConnectedToEntrance) {
-    // Входная точка (0,0) - обработка связи
-    if (precalculatedReachable.has('0,0') && (Math.abs(x) + Math.abs(y) === 1)) {
-      const isStartConnected = neighbors.some(({ dir, nx, ny }) => {
-        if (nx === 0 && ny === 0) {
-          return tempInfo.exits[dir as any];
-        }
-        return false;
-      });
-      if (!isStartConnected) {
-        return { valid: false, reason: 'Карта должна соединяться со входом' };
-      }
-    } else {
-      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    if (targetType === 'break_to_repair' && action.actionType === 'break_tool') {
+      return { can: playerGold >= 1, cost: 1 };
+    }
+    if (targetType === 'map_to_view_role' && action.actionType === 'map') {
+      return { can: playerGold >= 1, cost: 1 };
+    }
+    if (targetType === 'swap_cards_to_swap_roles' && action.actionType === 'swap_cards') {
+      return { can: playerGold >= 1, cost: 1 };
+    }
+    if (targetType === 'map_to_swap_roles' && action.actionType === 'map') {
+      return { can: playerGold >= 2, cost: 2 };
     }
   }
 
-  return { valid: true };
-};
+  return { can: false, cost: 0 };
+}
+
+function transformCard(card: Card, targetType: string): Card {
+  // Копируем исходный объект
+  const newCard = { ...card };
+
+  if (newCard.type === 'tunnel') {
+    const tunnel = newCard as TunnelCard;
+    if (targetType === 'crystal_tunnel') {
+      tunnel.hasCrystal = true;
+      tunnel.name += ' 💎';
+    } else if (targetType === 'tunnel_to_cave_in') {
+      return {
+        id: `transformed_cave_in_${Date.now()}`,
+        type: 'action',
+        actionType: 'cave_in',
+        name: 'Созданный Обвал',
+        description: 'Взорвите любой построенный туннель.',
+      } as ActionCard;
+    }
+  }
+
+  if (newCard.type === 'action') {
+    const action = newCard as ActionCard;
+    if (targetType === 'repair_to_break') {
+      action.actionType = 'break_tool';
+      action.toolType = action.toolType || 'pickaxe';
+      action.name = `Сломанная кирка (Ресурс)`;
+      action.description = 'Сломайте инструмент любому игроку.';
+    } else if (targetType === 'break_to_repair') {
+      action.actionType = 'repair_tool';
+      action.toolType = action.toolType || 'pickaxe';
+      action.name = `Ремонт: Кирка (Ресурс)`;
+      action.description = 'Почините инструмент у себя или другого игрока.';
+    } else if (targetType === 'map_to_view_role') {
+      action.actionType = 'view_role';
+      action.name = 'Просмотр роли';
+      action.description = 'Позволяет тайно подсмотреть карту роли другого игрока.';
+    } else if (targetType === 'swap_cards_to_swap_roles') {
+      action.actionType = 'swap_roles';
+      action.name = 'Смена роли';
+      action.description = 'Смените свою или чужую роль на случайную из неиспользуемых.';
+    } else if (targetType === 'map_to_swap_roles') {
+      action.actionType = 'swap_roles';
+      action.name = 'Смена роли (Продвинутая)';
+      action.description = 'Смените роль любого гнома на случайную.';
+    }
+  }
+
+  return newCard;
+}
+
+// Явный именованный экспорт для корректной работы Rollup/Vite
+export { canTransformCard, transformCard };
