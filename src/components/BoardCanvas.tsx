@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Flame, Eye } from 'lucide-react';
 import { GameState, PlacedCard, NetworkAction } from '../types';
 import { TunnelCardView } from './TunnelCardView';
-import { validateTunnelPlacement } from '../gameEngine';
+import { validateTunnelPlacement, calculateReachability } from '../gameEngine';
 
 interface BoardCanvasProps {
   gameState: GameState;
@@ -25,13 +25,10 @@ export default function BoardCanvas({
   sendAction,
 }: BoardCanvasProps) {
   const boardContainerRef = useRef<HTMLDivElement>(null);
-
-  // Состояния для перетаскивания поля мышкой
   const [isDragging, setIsDragging] = useState(false);
   const [hasDragged, setHasDragged] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
 
-  // Автоматически скроллит поле в центр (к стартовой карте 0,0) в начале раундов
   useEffect(() => {
     const container = boardContainerRef.current;
     if (!container) return;
@@ -46,10 +43,8 @@ export default function BoardCanvas({
     return () => clearTimeout(timeout);
   }, [gameState.round, gameState.status]);
 
-  // Обработчики мыши для скролла перетаскиванием
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Только левая кнопка мыши
-
+    if (e.button !== 0) return;
     const container = boardContainerRef.current;
     if (!container) return;
 
@@ -65,14 +60,12 @@ export default function BoardCanvas({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
-
     const container = boardContainerRef.current;
     if (!container) return;
 
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
 
-    // Считаем перетаскиванием, если мышь сдвинулась более чем на 5px
     if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
       setHasDragged(true);
     }
@@ -85,7 +78,6 @@ export default function BoardCanvas({
     setIsDragging(false);
   };
 
-  // Сенсорные обработчики для мобильных устройств
   const handleTouchStart = (e: React.TouchEvent) => {
     const container = boardContainerRef.current;
     if (!container) return;
@@ -103,7 +95,6 @@ export default function BoardCanvas({
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isDragging) return;
-
     const container = boardContainerRef.current;
     if (!container) return;
 
@@ -119,7 +110,6 @@ export default function BoardCanvas({
     container.scrollTop = dragStart.current.scrollTop - dy;
   };
 
-  // Расчет границ сетки: даем запас в 4 пустые ячейки для ощущения бесконечности поля
   const getGridRange = (grid: Record<string, PlacedCard>) => {
     let minX = 0;
     let maxX = 8;
@@ -161,12 +151,17 @@ export default function BoardCanvas({
     ? (me.hand.find(c => c.id === selectedCardIds[0]) || null)
     : null;
 
+  // ОПТИМИЗАЦИЯ: Рассчитываем связи РОДНОЙ сетки ОДИН раз для всего рендера! [1]
+  const precalculatedReachable = React.useMemo(() => {
+    return calculateReachability(gameState.grid);
+  }, [gameState.grid]);
+
   const getTunnelPlacementResult = (x: number, y: number) => {
     if (!gameState || !selectedCard || selectedCard.type !== 'tunnel') return { valid: false };
-    return validateTunnelPlacement(gameState.grid, selectedCard, x, y, isRotated);
+    // Передаем кэш достижимости для O(1) проверки
+    return validateTunnelPlacement(gameState.grid, selectedCard, x, y, isRotated, precalculatedReachable);
   };
 
-  // Стилизация курсора в зависимости от состояния зажатой мыши
   const cursorClass = isDragging ? 'cursor-grabbing select-none' : 'cursor-grab';
 
   return (
@@ -200,7 +195,6 @@ export default function BoardCanvas({
                 if (canCaveIn) borderHighlight = 'ring-2 ring-red-500 animate-pulse scale-102 z-20';
                 if (canMap) borderHighlight = 'ring-2 ring-sky-500 animate-pulse scale-102 z-20';
 
-                // Точное определение наличия золота
                 const goalInfo = gameState.goals.find(g => g.x === x && g.y === y);
                 const isGold = !!(placed.isGold || (goalInfo && goalInfo.isGold) || (placed.card && placed.card.id === 'goal_gold'));
 
@@ -209,7 +203,7 @@ export default function BoardCanvas({
                     key={key}
                     className={`relative transition-all duration-200 ${borderHighlight}`}
                     onClick={() => {
-                      if (hasDragged) return; // Игнорируем клик, если это было перетаскивание поля
+                      if (hasDragged) return;
                       if (canCaveIn) {
                         sendAction({
                           type: 'PLAY_ACTION',
@@ -256,7 +250,7 @@ export default function BoardCanvas({
                         rotated={isRotated}
                         preview={true}
                         onClick={() => {
-                          if (hasDragged) return; // Игнорируем клик при перетаскивании
+                          if (hasDragged) return;
                           sendAction({
                             type: 'PLAY_TUNNEL',
                             payload: { cardId: selectedCardIds[0], x, y, rotated: isRotated }

@@ -3,7 +3,6 @@ import React from 'react';
 import { GameState, NetworkAction, Card } from '../types';
 import { TunnelCardView } from './TunnelCardView';
 import { ActionCardView } from './ActionCardView';
-import { canTransformCard } from '../goldEngine';
 
 interface ActionHUDProps {
   gameState: GameState;
@@ -36,7 +35,6 @@ export default function ActionHUD({
     if (selectedCardIds.includes(card.id)) {
       setSelectedCardIds(selectedCardIds.filter(id => id !== card.id));
     } else {
-      // Поддерживаем выбор до 2 карт (для массовых действий)
       if (selectedCardIds.length < 2) {
         setSelectedCardIds([...selectedCardIds, card.id]);
         setIsRotated(false);
@@ -53,7 +51,6 @@ export default function ActionHUD({
   const selectedCards = me.hand.filter(c => selectedCardIds.includes(c.id));
   const selectedCard = selectedCards[0] || null;
 
-  // Проверка готовности массовых действий
   const isDoubleTunnelReady = selectedCards.length === 2 && selectedCards.every(c => c.type === 'tunnel');
   const isDoubleCaveInReady = selectedCards.length === 2 && selectedCards.some(c => c.type === 'action' && c.actionType === 'cave_in');
   const isDoubleMapReady = selectedCards.length === 2 && selectedCards.every(c => c.type === 'action' && c.actionType === 'map');
@@ -92,7 +89,7 @@ export default function ActionHUD({
           </div>
         </div>
 
-        {/* Панель выбранных карт и улучшений за золото */}
+        {/* Панель выбранных карт и действий */}
         <div className="w-full md:w-80 bg-stone-950 p-3 rounded-lg border border-amber-900/20 shrink-0 flex flex-col justify-between h-[200px] md:h-full overflow-y-auto">
           {selectedCardIds.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-4 select-none">
@@ -108,12 +105,96 @@ export default function ActionHUD({
                   <>
                     <span className="text-[10px] font-mono uppercase text-amber-500">Выбрано:</span>
                     <span className="text-xs font-bold text-stone-200">{selectedCard?.name}</span>
+                    <p className="text-[10px] text-stone-400 leading-snug">{selectedCard && 'description' in selectedCard ? selectedCard.description : ''}</p>
                     
-                    {/* Кнопки улучшений за расходуемое золото */}
-                    <div className="mt-1 flex flex-col gap-1 border-t border-stone-800 pt-1">
-                      <p className="text-[8px] font-mono text-stone-500 uppercase">Улучшить карту (🪙):</p>
-                      
-                      {/* Опции за 1 золото */}
+                    {/* КЛАССИЧЕСКАЯ ПОЛОМКА И ПОЧИНКА (ВОССТАНОВЛЕНО) */}
+                    {selectedCard?.type === 'action' && selectedCard.actionType === 'break_tool' && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        <span className="text-[8px] font-mono text-stone-500 uppercase">Сломать {selectedCard.toolType === 'lamp' ? 'Фонарь' : selectedCard.toolType === 'cart' ? 'Вагонетку' : 'Кирку'}:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {gameState.players
+                            .filter(p => p.id !== myPlayerId && p.active && !p.brokenTools.includes(selectedCard.toolType!))
+                            .map(p => (
+                              <button
+                                key={p.id}
+                                onClick={() => {
+                                  sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
+                                  setSelectedCardIds([]);
+                                }}
+                                className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/50 border border-red-800 text-red-200 text-[9px] font-mono rounded cursor-pointer"
+                              >
+                                {p.name}
+                              </button>
+                            ))}
+                          {gameState.players.filter(p => p.id !== myPlayerId && p.active && !p.brokenTools.includes(selectedCard.toolType!)).length === 0 && (
+                            <span className="text-[8px] text-stone-600 font-mono">Нет подходящих игроков</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedCard?.type === 'action' && selectedCard.actionType === 'repair_tool' && !selectedCard.repairTypes && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        <span className="text-[8px] font-mono text-stone-500 uppercase">Починить {selectedCard.toolType === 'lamp' ? 'Фонарь' : selectedCard.toolType === 'cart' ? 'Вагонетку' : 'Кирку'}:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {gameState.players
+                            .filter(p => p.active && p.brokenTools.includes(selectedCard.toolType!))
+                            .map(p => (
+                              <button
+                                key={p.id}
+                                onClick={() => {
+                                  sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
+                                  setSelectedCardIds([]);
+                                }}
+                                className="px-2 py-0.5 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800 text-emerald-200 text-[9px] font-mono rounded cursor-pointer"
+                              >
+                                {p.name} {p.id === myPlayerId && '(Вы)'}
+                              </button>
+                            ))}
+                          {gameState.players.filter(p => p.active && p.brokenTools.includes(selectedCard.toolType!)).length === 0 && (
+                            <span className="text-[8px] text-stone-600 font-mono">Инструмент у всех цел</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedCard?.type === 'action' && selectedCard.actionType === 'repair_tool' && selectedCard.repairTypes && (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <span className="text-[8px] font-mono text-stone-500 uppercase">Выберите инструмент и игрока для починки:</span>
+                        {selectedCard.repairTypes.map(tool => {
+                          const targets = gameState.players.filter(p => p.active && p.brokenTools.includes(tool));
+                          return (
+                            <div key={tool} className="flex flex-col gap-0.5">
+                              <span className="text-[8px] font-mono text-stone-500 uppercase">{tool === 'lamp' ? 'Фонарь' : tool === 'cart' ? 'Вагонетка' : 'Кирка'}:</span>
+                              <div className="flex flex-wrap gap-1">
+                                {targets.map(p => (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => {
+                                      sendAction({
+                                        type: 'PLAY_ACTION',
+                                        payload: { cardId: selectedCard.id, targetPlayerId: p.id, toolToRepair: tool }
+                                      });
+                                      setSelectedCardIds([]);
+                                    }}
+                                    className="px-2 py-0.5 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800 text-emerald-200 text-[9px] font-mono rounded cursor-pointer"
+                                  >
+                                    {p.name} {p.id === myPlayerId && '(Вы)'}
+                                  </button>
+                                ))}
+                                {targets.length === 0 && (
+                                  <span className="text-[8px] text-stone-600 font-mono">Ни у кого не сломан</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* УЛУЧШЕНИЯ КАРТ ЗА ЗОЛОТО */}
+                    <div className="mt-2 flex flex-col gap-1 border-t border-stone-800 pt-1">
+                      <p className="text-[8px] font-mono text-stone-500 uppercase">Улучшить за золото:</p>
                       {selectedCard?.type === 'tunnel' && !selectedCard.hasCrystal && (
                         <button
                           disabled={me.goldResources < 1}
@@ -136,7 +217,7 @@ export default function ActionHUD({
                           }}
                           className="text-[9px] bg-red-950 border border-red-800 text-red-200 p-1 rounded hover:bg-red-900 font-mono cursor-pointer"
                         >
-                          Изменить в Поломку (🪙 1)
+                          Превратить в Поломку (🪙 1)
                         </button>
                       )}
 
@@ -149,7 +230,7 @@ export default function ActionHUD({
                           }}
                           className="text-[9px] bg-emerald-950 border border-emerald-800 text-emerald-200 p-1 rounded hover:bg-emerald-900 font-mono cursor-pointer"
                         >
-                          Изменить в Ремонт (🪙 1)
+                          Превратить в Ремонт (🪙 1)
                         </button>
                       )}
 
@@ -258,7 +339,7 @@ export default function ActionHUD({
 
                     {selectedCard?.type === 'action' && selectedCard.actionType === 'tic_tac_toe' && (
                       <div className="mt-2 flex flex-col gap-1">
-                        <span className="text-[8px] text-stone-500 uppercase font-mono">Вызвать соперника на дуэль TTT:</span>
+                        <span className="text-[8px] text-stone-500 uppercase font-mono">Вызвать на дуэль TTT:</span>
                         {gameState.players.filter(p => p.id !== myPlayerId && p.active).map(p => (
                           <button
                             key={p.id}
@@ -276,9 +357,8 @@ export default function ActionHUD({
                   </>
                 ) : (
                   <>
-                    <span className="text-[10px] font-mono text-amber-500">Выбрано {selectedCardIds.length} карт</span>
+                    <span className="text-[10px] font-mono text-amber-500 font-bold">Выбрано {selectedCardIds.length} карт</span>
                     
-                    {/* Запуск массовых действий при выборе двух карт */}
                     {isDoubleTunnelReady && (
                       <button
                         onClick={() => {

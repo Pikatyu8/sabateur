@@ -13,7 +13,7 @@ export interface TunnelCard {
   };
   connectedParts: ('top' | 'right' | 'bottom' | 'left')[][];
   isLadder?: boolean;
-  hasCrystal?: boolean; // Кристаллы для геологов
+  hasCrystal?: boolean;
 }
 
 export interface ActionCard {
@@ -22,9 +22,9 @@ export interface ActionCard {
   actionType: 'break_tool' | 'repair_tool' | 'cave_in' | 'map' | 'view_role' | 'swap_roles' | 'swap_cards' | 'tic_tac_toe';
   name: string;
   description: string;
-  toolType?: 'lamp' | 'cart' | 'pickaxe'; // Для поломки и простого ремонта
-  repairTypes?: ('lamp' | 'cart' | 'pickaxe')[]; // Для двойного ремонта
-  tttDuration?: 15 | 30; // Время для дуэли в крестики-нолики
+  toolType?: 'lamp' | 'cart' | 'pickaxe';
+  repairTypes?: ('lamp' | 'cart' | 'pickaxe')[];
+  tttDuration?: 15 | 30;
 }
 
 export type Card = TunnelCard | ActionCard;
@@ -37,7 +37,7 @@ export interface PlacedCard {
   isGoal?: boolean;
   isGold?: boolean;
   isEntrance?: boolean;
-  flipped?: boolean; // Открыта ли цель
+  flipped?: boolean;
 }
 
 export type ToolType = 'lamp' | 'cart' | 'pickaxe';
@@ -46,13 +46,13 @@ export interface Player {
   id: string;
   name: string;
   isHost: boolean;
-  role: 'miner' | 'saboteur' | 'geologist' | null; // Геологи добавлены
+  role: 'miner' | 'saboteur' | 'geologist' | null;
   brokenTools: ToolType[];
   hand: Card[];
   handSize: number;
-  maxHandSize: number; // Динамический лимит руки
-  score: number; // Общий счет в золоте (постоянный)
-  goldResources: number; // Расходуемое золото внутри раунда
+  maxHandSize: number;
+  score: number;
+  goldResources: number;
   isWinnerOfRound?: boolean;
   active: boolean;
 }
@@ -65,9 +65,9 @@ export interface LogEntry {
   message: string;
   type: 'info' | 'success' | 'warning' | 'error' | 'chat';
   playerName?: string;
+  privateFor?: string; // Добавлено: ID игрока, который видит этот лог (скрыт от других)
 }
 
-// Состояние массового хода
 export interface MassActionState {
   active: boolean;
   type: 'double_tunnel' | 'double_cave_in' | 'double_map';
@@ -76,12 +76,11 @@ export interface MassActionState {
   mapsViewed: number;
 }
 
-// Состояние мини-игры Крестики-Нолики
 export interface TTTGameState {
   active: boolean;
   challengerId: string;
   targetId: string;
-  board: (string | null)[]; // 9 клеток
+  board: (string | null)[];
   currentTurnId: string;
   timeLimit: number;
   timeLeft: number;
@@ -93,7 +92,7 @@ export interface TTTGameState {
 export interface GameState {
   roomId: string;
   status: GameStatus;
-  round: number; // 1, 2, 3
+  round: number;
   players: Player[];
   grid: Record<string, PlacedCard>;
   deckCount: number;
@@ -108,15 +107,15 @@ export interface GameState {
     flipped: boolean;
     card: TunnelCard;
   }[];
-  unusedRoles: ('miner' | 'saboteur' | 'geologist')[]; // Пул неиспользуемых ролей
+  unusedRoles: ('miner' | 'saboteur' | 'geologist')[];
   logs: LogEntry[];
   goldCardCount: number;
-  revealedGoals: Record<string, boolean>; // x,y_playerId -> true
-  revealedRoles: Record<string, boolean>; // targetPlayerId_viewerPlayerId -> true (просмотренные роли)
+  revealedGoals: Record<string, boolean>;
+  revealedRoles: Record<string, boolean>;
   winnerTeam?: 'miners' | 'saboteurs' | 'geologists';
   roundGoldReward?: Record<string, number>;
-  massActionState?: MassActionState; // Активное массовое действие
-  tttState?: TTTGameState; // Состояние дуэли в крестики-нолики
+  massActionState?: MassActionState;
+  tttState?: TTTGameState;
 }
 
 export type NetworkAction =
@@ -129,7 +128,6 @@ export type NetworkAction =
   | { type: 'SEND_CHAT'; payload: { message: string } }
   | { type: 'NEXT_ROUND' }
   | { type: 'RESTART_GAME' }
-  // Новые сетевые действия:
   | { type: 'ACTIVATE_MASS_ACTION'; payload: { type: 'double_tunnel' | 'double_cave_in' | 'double_map'; cardId1?: string; cardId2?: string } }
   | { type: 'CONFIRM_MASS_ACTION' }
   | { type: 'TRANSFORM_CARD'; payload: { cardId: string; targetType: string; cost: number } }

@@ -22,6 +22,7 @@ const getSessionClientId = () => {
   return id;
 };
 
+// 1. Обновленная фильтрация состояния игрока
 export const filterStateForPlayer = (state: GameState, playerId: string): GameState => {
   const isRoundOver = state.status === 'round_end' || state.status === 'game_end';
 
@@ -47,8 +48,10 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
 
   return {
     ...state,
-    deck: [], // Очистка настоящей колоды
+    deck: [],
     grid: filteredGrid,
+    // Скрываем приватные логи других игроков
+    logs: state.logs.filter(log => !log.privateFor || log.privateFor === playerId),
     players: state.players.map(p => {
       const isMe = p.id === playerId;
       const isRoleRevealed = isMe || isRoundOver || !!state.revealedRoles[`${p.id}_${playerId}`];
@@ -76,6 +79,7 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
     }),
   };
 };
+
 
 const getPeerConfig = (iceServers?: any[]) => {
   if (typeof window === 'undefined') return undefined;
@@ -539,15 +543,25 @@ export const usePeerGame = () => {
             const newRole = updatedState.unusedRoles.pop()!;
             tPlayer.role = newRole;
             if (oldRole) updatedState.unusedRoles.push(oldRole);
-            // Перемешиваем пул неиспользуемых ролей
             updatedState.unusedRoles.sort(() => Math.random() - 0.5);
 
             player.hand.splice(cardIndex, 1);
             updatedState.discardPile.push(card);
-            updatedState = addLog(updatedState, `${player.name} инициировал смену роли для ${tPlayer.name}`, 'warning');
-          }
 
-        // Обмен картами (SAB2)
+            // Публичный лог о событии
+            updatedState = addLog(updatedState, `${player.name} сменил роль игроку ${tPlayer.name}`, 'warning');
+
+            // Приватное уведомление только для игрока, получившего новую роль
+            const roleRu = newRole === 'miner' ? 'Искатель Золота ⛏️' : newRole === 'geologist' ? 'Геолог 💎' : 'Вредитель 👺';
+            const privateLog: LogEntry = {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString(),
+              message: `[СЕКРЕТНО] Ваша новая роль: ${roleRu}!`,
+              type: 'success',
+              privateFor: tPlayer.id // Будет видно только ему
+            };
+            updatedState.logs = [privateLog, ...updatedState.logs];
+          }
         } else if (card.actionType === 'swap_cards') {
           if (!targetPlayer || targetPlayer.id === senderId) return;
           const tempHand = [...player.hand];

@@ -1,76 +1,101 @@
-// src/goldEngine.ts
-import { Card, TunnelCard, ActionCard } from './types';
+// src/gameEngine.ts (только обновленная функция validateTunnelPlacement)
+export const validateTunnelPlacement = (
+  grid: Record<string, PlacedCard>,
+  card: TunnelCard,
+  x: number,
+  y: number,
+  rotated: boolean,
+  precalculatedReachable?: Set<string> // Передаем кэш для O(1) проверки связи
+): { valid: boolean; reason?: string } => {
+  const key = `${x},${y}`;
 
-export const canTransformCard = (card: Card, targetType: string, playerGold: number): { can: boolean; cost: number } => {
-  // 1 золото:
-  // - Обычный туннель -> Туннель с кристаллом
-  // - Починка -> Поломка (и наоборот)
-  // - Просмотр цели -> Просмотр роли
-  // - Смена карт -> Смена роли
-  if (targetType === 'crystal_tunnel' && card.type === 'tunnel' && !card.hasCrystal) {
-    return { can: playerGold >= 1, cost: 1 };
-  }
-  if (targetType === 'repair_to_break' && card.type === 'action' && card.actionType === 'repair_tool') {
-    return { can: playerGold >= 1, cost: 1 };
-  }
-  if (targetType === 'break_to_repair' && card.type === 'action' && card.actionType === 'break_tool') {
-    return { can: playerGold >= 1, cost: 1 };
-  }
-  if (targetType === 'map_to_view_role' && card.type === 'action' && card.actionType === 'map') {
-    return { can: playerGold >= 1, cost: 1 };
-  }
-  if (targetType === 'swap_cards_to_swap_roles' && card.type === 'action' && card.actionType === 'swap_cards') {
-    return { can: playerGold >= 1, cost: 1 };
+  if (grid[key]) {
+    return { valid: false, reason: 'Здесь уже есть карта' };
   }
 
-  // 2 золота:
-  // - Просмотр цели -> Смена роли
-  // - Карточка туннеля -> Обвал
-  if (targetType === 'map_to_swap_roles' && card.type === 'action' && card.actionType === 'map') {
-    return { can: playerGold >= 2, cost: 2 };
-  }
-  if (targetType === 'tunnel_to_cave_in' && card.type === 'tunnel') {
-    return { can: playerGold >= 2, cost: 2 };
+  if (x === 0 && y === 0) {
+    return { valid: false, reason: 'Нельзя строить на входе в шахту' };
   }
 
-  return { can: false, cost: 0 };
-};
+  const tempPlaced: PlacedCard = { card, rotated, x, y };
+  const tempInfo = getRotatedExitsAndConnections(tempPlaced);
 
-export const transformCard = (card: Card, targetType: string): Card => {
-  const newCard = { ...card };
-  if (targetType === 'crystal_tunnel' && newCard.type === 'tunnel') {
-    newCard.hasCrystal = true;
-    newCard.name += ' 💎';
-  } else if (targetType === 'repair_to_break' && newCard.type === 'action') {
-    newCard.actionType = 'break_tool';
-    newCard.toolType = newCard.toolType || 'pickaxe';
-    newCard.name = `Сломанная кирка (Ресурс)`;
-    newCard.description = 'Сломайте инструмент любому игроку.';
-  } else if (targetType === 'break_to_repair' && newCard.type === 'action') {
-    newCard.actionType = 'repair_tool';
-    newCard.toolType = newCard.toolType || 'pickaxe';
-    newCard.name = `Ремонт: Кирка (Ресурс)`;
-    newCard.description = 'Почините инструмент себе или другому игроку.';
-  } else if (targetType === 'map_to_view_role' && newCard.type === 'action') {
-    newCard.actionType = 'view_role';
-    newCard.name = 'Просмотр роли';
-    newCard.description = 'Позволяет тайно подсмотреть карту роли другого игрока.';
-  } else if (targetType === 'swap_cards_to_swap_roles' && newCard.type === 'action') {
-    newCard.actionType = 'swap_roles';
-    newCard.name = 'Смена роли';
-    newCard.description = 'Смените свою или чужую роль на случайную из неиспользуемых.';
-  } else if (targetType === 'map_to_swap_roles' && newCard.type === 'action') {
-    newCard.actionType = 'swap_roles';
-    newCard.name = 'Смена роли (Продвинутая)';
-    newCard.description = 'Смените роль любого гнома на случайную.';
-  } else if (targetType === 'tunnel_to_cave_in') {
-    return {
-      id: `transformed_cave_in_${Date.now()}`,
-      type: 'action',
-      actionType: 'cave_in',
-      name: 'Созданный Обвал',
-      description: 'Взорвите любой построенный туннель.',
-    };
+  const neighbors = [
+    { dir: 'top', nx: x, ny: y - 1 },
+    { dir: 'bottom', nx: x, ny: y + 1 },
+    { dir: 'left', nx: x - 1, ny: y },
+    { dir: 'right', nx: x + 1, ny: y },
+  ];
+
+  let hasNeighbor = false;
+  let matchesAllNeighbors = true;
+  let isConnectedToEntrance = false;
+
+  for (const { dir, nx, ny } of neighbors) {
+    const neighborKey = `${nx},${ny}`;
+    const neighbor = grid[neighborKey];
+
+    if (neighbor) {
+      hasNeighbor = true;
+
+      if (!neighbor.isGoal) {
+        const neighborInfo = getRotatedExitsAndConnections(neighbor);
+        const opposing = getOpposingDir(dir as any);
+
+        const myExit = tempInfo.exits[dir as any];
+        const neighborExit = neighborInfo.exits[opposing];
+
+        if (myExit !== neighborExit) {
+          matchesAllNeighbors = false;
+          break;
+        }
+
+        // Если сосед достижим и имеет проход к нам, а мы к нему — значит путь есть
+        if (precalculatedReachable && precalculatedReachable.has(neighborKey) && myExit && neighborExit) {
+          isConnectedToEntrance = true;
+        }
+      } else if (neighbor.isGoal && neighbor.flipped) {
+        // Достижение открытых целей
+        const neighborInfo = getRotatedExitsAndConnections(neighbor);
+        const opposing = getOpposingDir(dir as any);
+        if (tempInfo.exits[dir as any] && neighborInfo.exits[opposing]) {
+          isConnectedToEntrance = true;
+        }
+      }
+    }
   }
-  return newCard;
+
+  if (!hasNeighbor) {
+    return { valid: false, reason: 'Карта должна примыкать к существующему туннелю' };
+  }
+
+  if (!matchesAllNeighbors) {
+    return { valid: false, reason: 'Туннели на стыке карт не совпадают' };
+  }
+
+  // Если у нас нет кэша, выполняем полный BFS (совместимость)
+  if (!precalculatedReachable) {
+    const tempGrid = { ...grid, [key]: tempPlaced };
+    const reached = calculateReachability(tempGrid);
+    if (!reached.has(key)) {
+      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    }
+  } else if (!isConnectedToEntrance) {
+    // Входная точка (0,0) - обработка связи
+    if (precalculatedReachable.has('0,0') && (Math.abs(x) + Math.abs(y) === 1)) {
+      const isStartConnected = neighbors.some(({ dir, nx, ny }) => {
+        if (nx === 0 && ny === 0) {
+          return tempInfo.exits[dir as any];
+        }
+        return false;
+      });
+      if (!isStartConnected) {
+        return { valid: false, reason: 'Карта должна соединяться со входом' };
+      }
+    } else {
+      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    }
+  }
+
+  return { valid: true };
 };

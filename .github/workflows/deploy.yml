@@ -1,25 +1,36 @@
-name: Deploy to GitHub Pages
+# .github/workflows/deploy.yml
+name: Deploy Saboteur Game
 
 on:
   push:
     branches:
-      - main # или название твоей главной ветки
-
-permissions:
-  contents: write
+      - main
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Встроенное быстрое кэширование npm пакетов
           cache: 'npm'
+
+      # Дополнительное глубокое кэширование папки node_modules и кэша Vite
+      - name: Cache dependencies and bundler cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+            dist
+          key: ${{ runner.os }}-build-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-
 
       - name: Install dependencies
         run: npm ci
@@ -30,5 +41,5 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: dist # папка, в которую Vite собирает билд
-          branch: gh-pages # ветка для статических файлов
+          folder: dist
+          branch: gh-pages
