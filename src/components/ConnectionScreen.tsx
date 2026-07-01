@@ -55,7 +55,7 @@ export default function ConnectionScreen({
               <input
                 id="player-name-input"
                 type="text"
-                maxLength={16}
+                maxLength={24}
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
                 placeholder="Гномыч_2000"
