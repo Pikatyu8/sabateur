@@ -1,5 +1,4 @@
 // src/components/VictoryOverlays.tsx
-// src/components/VictoryOverlays.tsx
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Sparkles, Coins } from 'lucide-react';
@@ -59,7 +58,8 @@ export default function VictoryOverlays({
                         <span>
                           {p.name}{' '}
                           <span className="text-[10px] text-stone-500">
-                            ({p.role === 'miner' ? 'Шахтер ⛏️' : 'Вредитель 👺'})
+                            {/* Исправлено: Добавлена поддержка роли Геолога в результаты раунда */}
+                            ({p.role === 'miner' ? 'Шахтер ⛏️' : p.role === 'geologist' ? 'Геолог 💎' : 'Вредитель 👺'})
                           </span>
                         </span>
                         <span className="text-yellow-500 font-bold">+{wonGold} 🪙</span>
@@ -113,7 +113,13 @@ export default function VictoryOverlays({
                     <div key={p.id} className="py-2 flex justify-between items-center">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-stone-500 font-bold">{idx + 1}.</span>
-                        <span className="text-stone-200 text-sm truncate">{p.name}</span>
+                        <span className="text-stone-200 text-sm truncate">
+                          {p.name}{' '}
+                          <span className="text-[10px] text-stone-500">
+                            {/* Исправлено: Добавлена финальная роль игрока в таблицу лидеров */}
+                            ({p.role === 'miner' ? 'Шахтер ⛏️' : p.role === 'geologist' ? 'Геолог 💎' : 'Вредитель 👺'})
+                          </span>
+                        </span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0 text-yellow-500 font-bold">
                         <Coins className="w-4 h-4" />

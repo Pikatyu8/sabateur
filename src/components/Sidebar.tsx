@@ -90,8 +90,11 @@ export default function Sidebar({
                   {(isRoundEnd || isGameEnd) && p.role && (
                     <div className="mt-2 pt-1.5 border-t border-stone-800 flex justify-between items-center text-[10px] font-mono">
                       <span className="text-stone-500">РОЛЬ:</span>
+                      {/* Исправлено: Добавлена поддержка роли Геолога */}
                       {p.role === 'miner' ? (
                         <span className="text-emerald-400 font-bold">⛏️ ЗОЛОТОИСКАТЕЛЬ</span>
+                      ) : p.role === 'geologist' ? (
+                        <span className="text-cyan-400 font-bold">💎 ГЕОЛОГ</span>
                       ) : (
                         <span className="text-red-400 font-bold">👺 ВРЕДИТЕЛЬ</span>
                       )}

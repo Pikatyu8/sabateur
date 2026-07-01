@@ -643,7 +643,25 @@ export const usePeerGame = () => {
             player.hand.splice(cardIndex, 1);
             player.handSize = player.hand.length;
             updatedState.discardPile.push(card);
+            
+            // Сначала добавляем публичный лог о факте просмотра
             updatedState = addLog(updatedState, `${player.name} тайно посмотрел роль ${targetPlayer.name}`, 'info');
+
+            // Определяем роль в читаемом формате на русском языке
+            const roleRu = targetPlayer.role === 'miner' 
+              ? 'Шахтер ⛏️' 
+              : targetPlayer.role === 'geologist' 
+                ? 'Геолог 💎' 
+                : 'Вредитель 👺';
+
+            // Добавляем приватную запись в начало журнала логов, доступную только инициатору (senderId)
+            updatedState.logs = [{
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString(),
+              message: `[СЕКРЕТНО] Роль игрока ${targetPlayer.name}: ${roleRu}`,
+              type: 'success',
+              privateFor: senderId
+            }, ...updatedState.logs];
 
           } else if (card.actionType === 'swap_roles') {
             const tPlayer = targetPlayer || player;
@@ -904,11 +922,8 @@ export const usePeerGame = () => {
 
           updatedState = addLog(updatedState, `${player.name} сбросил карт: ${cardIds.length}`, 'info');
 
-          // Исправлено: Сброс ровно двух карт восстанавливает лимит руки до 6
-          if (cardIds.length === 2) {
-            player.maxHandSize = 6;
-            updatedState = addLog(updatedState, `${player.name} сбросил 2 карты и восстановил лимит руки до 6!`, 'success');
-          }
+          // Убрано некорректное восстановление лимита руки до 6. 
+          // Лимит (maxHandSize) теперь строго сохраняет свое уменьшенное значение до конца раунда.
 
           while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
             player.hand.push(updatedState.deck.pop()!);
