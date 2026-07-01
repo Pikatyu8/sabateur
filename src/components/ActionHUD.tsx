@@ -66,7 +66,8 @@ export default function ActionHUD({
               ⛏️ Ваши карты в руке ({me.hand.length}):
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-yellow-500 font-bold">🪙 Золото: {me.goldResources}</span>
+              {/* Исправлено: me.goldResources -> me.score */}
+              <span className="text-yellow-500 font-bold">🪙 Золото: {me.score}</span>
               {isMyTurn && (
                 <span className="text-emerald-400 font-bold animate-pulse uppercase">★ ВАШ ХОД!</span>
               )}
@@ -192,12 +193,12 @@ export default function ActionHUD({
                       </div>
                     )}
 
-                    {/* УЛУЧШЕНИЯ КАРТ ЗА ЗОЛОТО */}
+                    {/* УЛУЧШЕНИЯ КАРТ ЗА ЗОЛОТО (Исправлено me.goldResources -> me.score) */}
                     <div className="mt-2 flex flex-col gap-1 border-t border-stone-800 pt-1">
                       <p className="text-[8px] font-mono text-stone-500 uppercase">Улучшить за золото:</p>
                       {selectedCard?.type === 'tunnel' && !selectedCard.hasCrystal && (
                         <button
-                          disabled={me.goldResources < 1}
+                          disabled={me.score < 1}
                           onClick={() => {
                             sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'crystal_tunnel', cost: 1 } });
                             setSelectedCardIds([]);
@@ -210,7 +211,7 @@ export default function ActionHUD({
 
                       {selectedCard?.type === 'action' && selectedCard.actionType === 'repair_tool' && (
                         <button
-                          disabled={me.goldResources < 1}
+                          disabled={me.score < 1}
                           onClick={() => {
                             sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'repair_to_break', cost: 1 } });
                             setSelectedCardIds([]);
@@ -223,7 +224,7 @@ export default function ActionHUD({
 
                       {selectedCard?.type === 'action' && selectedCard.actionType === 'break_tool' && (
                         <button
-                          disabled={me.goldResources < 1}
+                          disabled={me.score < 1}
                           onClick={() => {
                             sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'break_to_repair', cost: 1 } });
                             setSelectedCardIds([]);
@@ -237,7 +238,7 @@ export default function ActionHUD({
                       {selectedCard?.type === 'action' && selectedCard.actionType === 'map' && (
                         <div className="flex gap-1 flex-col">
                           <button
-                            disabled={me.goldResources < 1}
+                            disabled={me.score < 1}
                             onClick={() => {
                               sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'map_to_view_role', cost: 1 } });
                               setSelectedCardIds([]);
@@ -247,7 +248,7 @@ export default function ActionHUD({
                             Преобразовать в Оценку Роли (🪙 1)
                           </button>
                           <button
-                            disabled={me.goldResources < 2}
+                            disabled={me.score < 2}
                             onClick={() => {
                               sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'map_to_swap_roles', cost: 2 } });
                               setSelectedCardIds([]);
@@ -261,7 +262,7 @@ export default function ActionHUD({
 
                       {selectedCard?.type === 'tunnel' && (
                         <button
-                          disabled={me.goldResources < 2}
+                          disabled={me.score < 2}
                           onClick={() => {
                             sendAction({ type: 'TRANSFORM_CARD', payload: { cardId: selectedCard.id, targetType: 'tunnel_to_cave_in', cost: 2 } });
                             setSelectedCardIds([]);
@@ -395,7 +396,7 @@ export default function ActionHUD({
                       </button>
                     )}
 
-                    {/* САМОПОЧИНКА СБРОСОМ 2 КАРТ (Добавлено: Управление саморемонтом) */}
+                    {/* САМОПОЧИНКА СБРОСОМ 2 КАРТ */}
                     {me.brokenTools.length > 0 && (
                       <div className="mt-2 flex flex-col gap-1 border-t border-stone-800/60 pt-1.5 w-full">
                         <span className="text-[8px] font-mono text-stone-500 uppercase leading-snug">Починить свой инструмент (Сбросить 2 карты, лимит руки -1):</span>

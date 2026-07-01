@@ -51,8 +51,7 @@ export interface Player {
   hand: Card[];
   handSize: number;
   maxHandSize: number;
-  score: number;
-  goldResources: number;
+  score: number; // Единое золото (бывш. score и goldResources)
   isWinnerOfRound?: boolean;
   active: boolean;
 }

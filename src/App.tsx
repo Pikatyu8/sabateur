@@ -109,6 +109,13 @@ export default function App() {
               <span className="text-stone-700">|</span>
               <span>Лимит карт: {me?.maxHandSize}</span>
             </div>
+
+            {/* Косметика: Красная пульсирующая надпись "Ваш ход" при активном ходе игрока */}
+            {isMyTurn && (
+              <span className="text-red-500 font-bold font-mono text-xs animate-pulse uppercase border border-red-500/30 px-2.5 py-1 rounded bg-red-950/20 shrink-0">
+                ★ ВАШ ХОД!
+              </span>
+            )}
           </div>
 
           {me && me.role && (

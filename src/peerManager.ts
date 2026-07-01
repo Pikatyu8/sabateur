@@ -46,7 +46,7 @@ export const filterStateForPlayer = (state: GameState, playerId: string): GameSt
 
   return {
     ...state,
-    deck: [], // Скрываем реальную колоду
+    deck: [], 
     grid: filteredGrid,
     logs: state.logs.filter(log => !log.privateFor || log.privateFor === playerId),
     players: state.players.map(p => {
@@ -89,7 +89,6 @@ export const usePeerGame = () => {
   const myPlayerIdRef = useRef<string>('');
   const tttTimerIntervalRef = useRef<any>(null);
 
-  // Реф для хранения самого актуального обработчика событий, защищающий от stale closures
   const latestHandlerRef = useRef<any>(null);
 
   const generateRoomCode = () => {
@@ -119,7 +118,7 @@ export const usePeerGame = () => {
     setConnectionStatus('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`; // Добавлен путь /ws
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     
     console.log('📡 Connecting to WebSocket server:', wsUrl);
     const ws = new WebSocket(wsUrl);
@@ -146,8 +145,7 @@ export const usePeerGame = () => {
           hand: [],
           handSize: 0,
           maxHandSize: 6,
-          score: 0,
-          goldResources: 3,
+          score: 3, // Унифицировано: стартовый раунд дает 3 золота на баланс score
           active: true,
         };
 
@@ -211,7 +209,6 @@ export const usePeerGame = () => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        // Всегда вызываем актуальный обработчик из рефа
         latestHandlerRef.current?.(message);
       } catch (err) {
         console.error('❌ Error parsing WS message:', err);
@@ -277,7 +274,6 @@ export const usePeerGame = () => {
     }
   };
 
-  // Обновляем реф на каждом рендере, чтобы обработчик всегда имел доступ к свежему стейту
   latestHandlerRef.current = handleServerMessage;
 
   useEffect(() => {
@@ -301,7 +297,7 @@ export const usePeerGame = () => {
       console.log(`📡 Sending STATE_UPDATE to guest [${p.name}] (ID: ${p.id})`);
       wsRef.current?.send(JSON.stringify({
         type: 'STATE_UPDATE',
-        roomId: fullState.roomId, // Гарантированно берем не-устаревший ID из объекта игры, а не из стейта замыкания
+        roomId: fullState.roomId,
         targetId: p.id,
         state: filtered
       }));
@@ -364,8 +360,7 @@ export const usePeerGame = () => {
       hand: [],
       handSize: 0,
       maxHandSize: 6,
-      score: 0,
-      goldResources: 3,
+      score: 3, // Унифицировано: стартовый баланс равен 3
       active: true,
     };
 
@@ -434,7 +429,7 @@ export const usePeerGame = () => {
     const loser = fullState.players.find(p => p.id === loserChoice);
 
     if (winner && loser) {
-      winner.goldResources += 3;
+      winner.score += 3; // Унифицировано: победителю начисляем score
       loser.brokenTools = ['lamp', 'cart', 'pickaxe'];
       let updated = addLog(fullState, `🎡 Колесо выбрало проигравшим ${loser.name}! Все инструменты сломаны. ${winner.name} получил 3 золота!`, 'success');
       ttt.active = false;
@@ -459,7 +454,6 @@ export const usePeerGame = () => {
     }
     const player = updatedState.players[playerIndex];
 
-    // Безопасный перехват любых падений JS внутри игрового движка
     try {
       switch (action.type) {
         case 'START_GAME': {
@@ -554,7 +548,6 @@ export const usePeerGame = () => {
 
           const { cardId, targetPlayerId, x, y, toolToRepair } = action.payload;
 
-          // Обработка активных массовых действий без привязки к конкретной карте на руках (так как они сбрасываются при активации)
           if (updatedState.massActionState?.active) {
             if (updatedState.massActionState.type === 'double_cave_in') {
               if (x === undefined || y === undefined) return;
@@ -838,12 +831,12 @@ export const usePeerGame = () => {
 
         case 'TRANSFORM_CARD': {
           const { cardId, targetType, cost } = action.payload;
-          if (player.goldResources < cost) return;
+          if (player.score < cost) return; // Унифицировано: player.goldResources -> player.score
 
           const cardIdx = player.hand.findIndex(c => c.id === cardId);
           if (cardIdx === -1) return;
 
-          player.goldResources -= cost;
+          player.score -= cost; // Унифицировано: player.goldResources -> player.score
           player.hand[cardIdx] = transformCard(player.hand[cardIdx], targetType);
           updatedState = addLog(updatedState, `${player.name} потратил ${cost} золота на преобразование карты в руке`, 'success');
           break;
@@ -869,7 +862,7 @@ export const usePeerGame = () => {
             const loserObj = updatedState.players.find(p => p.id === loserId);
 
             if (winnerObj && loserObj) {
-              winnerObj.goldResources += 3;
+              winnerObj.score += 3; // Унифицировано: winnerObj.goldResources -> winnerObj.score
               loserObj.brokenTools = ['lamp', 'cart', 'pickaxe'];
               updatedState = addLog(updatedState, `🎉 ${winnerObj.name} победил в Крестики-Нолики! Получено 3 золота. У ${loserObj.name} сломаны все инструменты!`, 'success');
             }
@@ -911,6 +904,12 @@ export const usePeerGame = () => {
 
           updatedState = addLog(updatedState, `${player.name} сбросил карт: ${cardIds.length}`, 'info');
 
+          // Исправлено: Сброс ровно двух карт восстанавливает лимит руки до 6
+          if (cardIds.length === 2) {
+            player.maxHandSize = 6;
+            updatedState = addLog(updatedState, `${player.name} сбросил 2 карты и восстановил лимит руки до 6!`, 'success');
+          }
+
           while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
             player.hand.push(updatedState.deck.pop()!);
           }
@@ -921,42 +920,41 @@ export const usePeerGame = () => {
           break;
         }
 
-      case 'REPAIR_SELF_WITH_DISCARD': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
+        case 'REPAIR_SELF_WITH_DISCARD': {
+          if (updatedState.status !== 'playing') return;
+          if (updatedState.currentTurn !== playerIndex) return;
 
-        const { cardIds, toolToRepair } = action.payload;
-        if (!cardIds || cardIds.length !== 2) return;
+          const { cardIds, toolToRepair } = action.payload;
+          if (!cardIds || cardIds.length !== 2) return;
 
-        const toolIdx = player.brokenTools.indexOf(toolToRepair);
-        if (toolIdx === -1) return;
+          const toolIdx = player.brokenTools.indexOf(toolToRepair);
+          if (toolIdx === -1) return;
 
-        cardIds.forEach(id => {
-          const cardIndex = player.hand.findIndex(c => c.id === id);
-          if (cardIndex !== -1) {
-            const discardedCard = player.hand.splice(cardIndex, 1)[0];
-            updatedState.discardPile.push(discardedCard);
+          cardIds.forEach(id => {
+            const cardIndex = player.hand.findIndex(c => c.id === id);
+            if (cardIndex !== -1) {
+              const discardedCard = player.hand.splice(cardIndex, 1)[0];
+              updatedState.discardPile.push(discardedCard);
+            }
+          });
+
+          player.brokenTools.splice(toolIdx, 1);
+          player.handSize = player.hand.length;
+
+          player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+
+          const toolNameRu = toolToRepair === 'lamp' ? 'Фонарь' : toolToRepair === 'cart' ? 'Вагонетку' : 'Кирку';
+          updatedState = addLog(updatedState, `${player.name} сбросил 2 карты (лимит руки -1) и починил свой инструмент: ${toolNameRu}`, 'success');
+
+          while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+            player.hand.push(updatedState.deck.pop()!);
           }
-        });
+          player.handSize = player.hand.length;
+          updatedState.deckCount = updatedState.deck.length;
 
-        player.brokenTools.splice(toolIdx, 1);
-        player.handSize = player.hand.length;
-
-        // Самосброс 2-х карт для починки уменьшает максимальный лимит руки на 1 (правило Saboteur 2)
-        player.maxHandSize = Math.max(2, player.maxHandSize - 1);
-
-        const toolNameRu = toolToRepair === 'lamp' ? 'Фонарь' : toolToRepair === 'cart' ? 'Вагонетку' : 'Кирку';
-        updatedState = addLog(updatedState, `${player.name} сбросил 2 карты (лимит руки -1) и починил свой инструмент: ${toolNameRu}`, 'success');
-
-        while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
-          player.hand.push(updatedState.deck.pop()!);
+          updatedState = nextTurn(updatedState);
+          break;
         }
-        player.handSize = player.hand.length;
-        updatedState.deckCount = updatedState.deck.length;
-
-        updatedState = nextTurn(updatedState);
-        break;
-      }
 
         case 'SEND_CHAT': {
           const { message } = action.payload;
@@ -984,12 +982,14 @@ export const usePeerGame = () => {
       }
     } catch (error: any) {
       console.error('❌ CRASH inside handleNetworkAction:', error);
-      // Ошибка логируется и отправляется на экран всем игрокам, предотвращая вечную "заморозку" игры
       updatedState = addLog(updatedState, `System Error: ${error.message || error}`, 'error');
     }
 
-    // Если отправитель — гость, делаем искусственную задержку (100мс) перед отправкой STATE_UPDATE.
-    // Это дает WebSocket-серверу время полностью разгрузить буферы после CLIENT_ACTION и исключает гонку сетевых пакетов на Radmin VPN.
+    // Исправлено: Безусловно очищаем зависшие состояния массовых действий, если раунд закончился (или сменился статус)
+    if (updatedState.status !== 'playing') {
+      updatedState.massActionState = undefined;
+    }
+
     const isActionFromGuest = senderId !== myPlayerIdRef.current;
     if (isActionFromGuest) {
       console.log('⏱️ Delaying broadcast State Update by 100ms for Guest network stability...');
@@ -1009,13 +1009,14 @@ export const usePeerGame = () => {
     updated.revealedGoals = {};
     updated.revealedRoles = {};
     updated.winnerTeam = undefined;
+    updated.massActionState = undefined; // Исправлено: Гарантированная очистка массового действия при рестарте/новом раунде
 
     updated.players.forEach(p => {
       p.brokenTools = [];
       p.hand = [];
       p.handSize = 0;
       p.maxHandSize = 6;
-      p.goldResources = 3;
+      p.score += 3; // Унифицировано: Каждому выдается по 3 золота на единый баланс
       p.isWinnerOfRound = false;
     });
 
