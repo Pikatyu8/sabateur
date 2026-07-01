@@ -6,7 +6,7 @@ import path from 'path';
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 interface ClientSession {
   socket: WebSocket;
@@ -122,6 +122,6 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер запущен на порту ${PORT}`);
 });
