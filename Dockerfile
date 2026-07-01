@@ -11,11 +11,11 @@ RUN npm install
 # Копируем остальные файлы проекта
 COPY . .
 
-# Открываем порт 7860, который ожидает Hugging Face
-EXPOSE 7860
+# Открываем порт 3000, который ожидает Hugging Face
+EXPOSE 3000
 
 # Задаем переменные окружения
-ENV PORT=7860
+ENV PORT=3000
 ENV NODE_ENV=production
 
 # Запускаем TypeScript-сервер напрямую с помощью утилиты tsx (ES-совместимой)
