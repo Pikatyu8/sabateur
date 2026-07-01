@@ -89,12 +89,8 @@ export const usePeerGame = () => {
   const myPlayerIdRef = useRef<string>('');
   const tttTimerIntervalRef = useRef<any>(null);
 
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
-    };
-  }, []);
+  // Реф для хранения самого актуального обработчика событий, защищающий от stale closures
+  const latestHandlerRef = useRef<any>(null);
 
   const generateRoomCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -122,14 +118,15 @@ export const usePeerGame = () => {
   const connectWebSocket = (rCode: string, isHostRole: boolean, name: string, playerId: string) => {
     setConnectionStatus('connecting');
 
-    // Подключение происходит строго на тот IP/домен и порт, с которого загружена страница [1.2.7]
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     
+    console.log('📡 Connecting to WebSocket server:', wsUrl);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      console.log('📡 WebSocket connected! Sending JOIN_ROOM...');
       ws.send(JSON.stringify({
         type: 'JOIN_ROOM',
         roomId: rCode,
@@ -140,7 +137,6 @@ export const usePeerGame = () => {
       setConnectionStatus('connected');
 
       if (isHostRole) {
-        // Локальное состояние хоста
         const initialPlayer: Player = {
           id: playerId,
           name,
@@ -215,13 +211,15 @@ export const usePeerGame = () => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        handleServerMessage(message);
+        // Всегда вызываем актуальный обработчик из рефа
+        latestHandlerRef.current?.(message);
       } catch (err) {
-        console.error('Ошибка разбора WS сообщения:', err);
+        console.error('❌ Error parsing WS message:', err);
       }
     };
 
     ws.onclose = () => {
+      console.warn('⚠️ WebSocket connection closed. Reconnecting in 3s...');
       setConnectionStatus('disconnected');
       setTimeout(() => {
         if (wsRef.current === ws) {
@@ -231,37 +229,66 @@ export const usePeerGame = () => {
     };
 
     ws.onerror = (err) => {
-      console.error('Ошибка сетевого сокета:', err);
+      console.error('❌ WebSocket error:', err);
       setConnectionStatus('error');
-      setErrorMessage('Не удалось связаться с игровым сервером по сети Radmin VPN.');
+      setErrorMessage('Не удалось связаться с игровым сервером.');
     };
   };
 
   const handleServerMessage = (message: any) => {
-    const { type, payload } = message;
+    console.log('📩 Incoming WS Message raw:', message);
+    const { type } = message;
+    const payload = message.payload || message;
 
     switch (type) {
       case 'GUEST_JOINED': {
-        handleJoinAction(payload.playerId, payload.playerName);
+        const guestId = payload.playerId || message.playerId;
+        const guestName = payload.playerName || message.playerName;
+        console.log('👥 Guest joined event:', guestId, guestName);
+        handleJoinAction(guestId, guestName);
         break;
       }
       case 'CLIENT_ACTION': {
-        handleNetworkAction(payload.senderId, payload.action);
+        const senderId = payload.senderId || message.senderId;
+        const action = payload.action || message.action;
+        console.log('⚡ Client action received from server:', senderId, action);
+        if (senderId && action) {
+          handleNetworkAction(senderId, action);
+        } else {
+          console.error('❌ Invalid CLIENT_ACTION structure:', message);
+        }
         break;
       }
       case 'STATE_UPDATE': {
-        setGameState(payload as GameState);
+        const state = message.state || payload.state || payload;
+        console.log('🔄 STATE_UPDATE processed:', state);
+        setGameState(state as GameState);
         setConnectionStatus('connected');
         break;
       }
       case 'GUEST_LEFT': {
-        handlePlayerDisconnect(payload.playerId);
+        const guestId = payload.playerId || message.playerId;
+        console.log('👥 Guest left event:', guestId);
+        handlePlayerDisconnect(guestId);
         break;
       }
+      default:
+        console.log('❓ Unknown WS packet type:', type);
     }
   };
 
+  // Обновляем реф на каждом рендере, чтобы обработчик всегда имел доступ к свежему стейту
+  latestHandlerRef.current = handleServerMessage;
+
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+    };
+  }, []);
+
   const broadcastState = (fullState: GameState) => {
+    console.log('📢 Broadcasting new GameState to all peers...', fullState);
     trueGameStateRef.current = fullState;
 
     const filteredHostState = filterStateForPlayer(fullState, myPlayerIdRef.current);
@@ -270,9 +297,11 @@ export const usePeerGame = () => {
     fullState.players.forEach(p => {
       if (p.id === myPlayerIdRef.current) return;
       const filtered = filterStateForPlayer(fullState, p.id);
+      
+      console.log(`📡 Sending STATE_UPDATE to guest [${p.name}] (ID: ${p.id})`);
       wsRef.current?.send(JSON.stringify({
         type: 'STATE_UPDATE',
-        roomId: roomCode,
+        roomId: fullState.roomId, // Гарантированно берем не-устаревший ID из объекта игры, а не из стейта замыкания
         targetId: p.id,
         state: filtered
       }));
@@ -286,6 +315,7 @@ export const usePeerGame = () => {
 
     const hostPlayerId = Math.random().toString(36).substring(2, 9);
     myPlayerIdRef.current = hostPlayerId;
+    console.log('👑 Creating room as Host. Generated ID:', hostPlayerId);
 
     connectWebSocket(code, true, playerName, hostPlayerId);
   };
@@ -297,6 +327,7 @@ export const usePeerGame = () => {
 
     const myPeerId = getSessionClientId();
     myPlayerIdRef.current = myPeerId;
+    console.log('👥 Joining room as Guest. Client ID:', myPeerId);
 
     connectWebSocket(cleanedCode, false, playerName, myPeerId);
   };
@@ -413,396 +444,482 @@ export const usePeerGame = () => {
   };
 
   const handleNetworkAction = (senderId: string, action: NetworkAction) => {
+    console.log('🎮 Processing network action:', senderId, action.type, action);
     const fullState = trueGameStateRef.current;
-    if (!fullState) return;
+    if (!fullState) {
+      console.error('❌ Action rejected: trueGameStateRef is null');
+      return;
+    }
 
     let updatedState = { ...fullState };
     const playerIndex = updatedState.players.findIndex(p => p.id === senderId);
-    if (playerIndex === -1) return;
+    if (playerIndex === -1) {
+      console.error('❌ Action rejected: sender not found in room players', senderId);
+      return;
+    }
     const player = updatedState.players[playerIndex];
 
-    switch (action.type) {
-      case 'START_GAME': {
-        if (senderId !== updatedState.hostId) return;
-        updatedState = startRound(updatedState, 1);
-        break;
-      }
-
-      case 'PLAY_TUNNEL': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
-
-        if (player.brokenTools.length > 0) {
-          updatedState = addLog(updatedState, `${player.name}: Сначала почините инструмент!`, 'error');
-          broadcastState(updatedState);
-          return;
+    // Безопасный перехват любых падений JS внутри игрового движка
+    try {
+      switch (action.type) {
+        case 'START_GAME': {
+          if (senderId !== updatedState.hostId) return;
+          updatedState = startRound(updatedState, 1);
+          break;
         }
 
-        const { cardId, x, y, rotated } = action.payload;
-        const cardIndex = player.hand.findIndex(c => c.id === cardId);
-        if (cardIndex === -1) return;
-        const card = player.hand[cardIndex] as TunnelCard;
+        case 'PLAY_TUNNEL': {
+          if (updatedState.status !== 'playing') {
+            console.warn('❌ Action rejected: Game is not in playing status');
+            return;
+          }
+          if (updatedState.currentTurn !== playerIndex) {
+            console.warn(`❌ Action rejected: Not your turn! Active: ${updatedState.currentTurn}, You: ${playerIndex}`);
+            return;
+          }
 
-        const validation = validateTunnelPlacement(updatedState.grid, card, x, y, rotated);
-        if (!validation.valid) {
-          updatedState = addLog(updatedState, `${player.name}: Ошибка! ${validation.reason}`, 'error');
-          broadcastState(updatedState);
-          return;
-        }
+          if (player.brokenTools.length > 0) {
+            console.warn('❌ Action rejected: Player has broken tools');
+            updatedState = addLog(updatedState, `${player.name}: Сначала почините инструмент!`, 'error');
+            broadcastState(updatedState);
+            return;
+          }
 
-        const newPlaced: PlacedCard = { card, rotated, x, y };
-        updatedState.grid[`${x},${y}`] = newPlaced;
-        player.hand.splice(cardIndex, 1);
-        player.handSize = player.hand.length;
+          const { cardId, x, y, rotated } = action.payload;
+          const cardIndex = player.hand.findIndex(c => c.id === cardId);
+          if (cardIndex === -1) {
+            console.warn('❌ Action rejected: Card not found in hand:', cardId);
+            return;
+          }
+          const card = player.hand[cardIndex] as TunnelCard;
 
-        updatedState = addLog(updatedState, `${player.name} построил туннель на (${x}, ${y})`, 'info');
+          const validation = validateTunnelPlacement(updatedState.grid, card, x, y, rotated);
+          if (!validation.valid) {
+            console.warn('❌ Action rejected: Tunnel placement invalid:', validation.reason);
+            updatedState = addLog(updatedState, `${player.name}: Ошибка! ${validation.reason}`, 'error');
+            broadcastState(updatedState);
+            return;
+          }
 
-        if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_tunnel') {
-          updatedState.massActionState.tunnelsPlaced += 1;
-          if (updatedState.massActionState.tunnelsPlaced >= 2) {
-            player.maxHandSize = Math.max(2, player.maxHandSize - 1);
-            updatedState = addLog(updatedState, `Массовая постройка завершена! Лимит руки ${player.name} уменьшен до ${player.maxHandSize}`, 'warning');
-            
-            while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+          const newPlaced: PlacedCard = { card, rotated, x, y };
+          updatedState.grid[`${x},${y}`] = newPlaced;
+          player.hand.splice(cardIndex, 1);
+          player.handSize = player.hand.length;
+
+          updatedState = addLog(updatedState, `${player.name} построил туннель на (${x}, ${y})`, 'info');
+
+          if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_tunnel') {
+            updatedState.massActionState.tunnelsPlaced += 1;
+            updatedState = checkGoalReveal(updatedState, senderId);
+
+            if (updatedState.status === 'playing') {
+              if (updatedState.massActionState.tunnelsPlaced >= 2) {
+                player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+                updatedState = addLog(updatedState, `Массовая постройка завершена! Лимит руки ${player.name} уменьшен до ${player.maxHandSize}`, 'warning');
+                
+                while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                  player.hand.push(updatedState.deck.pop()!);
+                }
+                player.handSize = player.hand.length;
+                updatedState.deckCount = updatedState.deck.length;
+
+                updatedState.massActionState = undefined;
+                updatedState = nextTurn(updatedState);
+              }
+            }
+          } else {
+            if (updatedState.deck.length > 0) {
               player.hand.push(updatedState.deck.pop()!);
             }
             player.handSize = player.hand.length;
             updatedState.deckCount = updatedState.deck.length;
 
-            updatedState.massActionState = undefined;
             updatedState = checkGoalReveal(updatedState, senderId);
             if (updatedState.status === 'playing') {
               updatedState = nextTurn(updatedState);
             }
           }
-        } else {
-          if (updatedState.deck.length > 0) {
-            player.hand.push(updatedState.deck.pop()!);
-          }
-          player.handSize = player.hand.length;
-          updatedState.deckCount = updatedState.deck.length;
-
-          updatedState = checkGoalReveal(updatedState, senderId);
-          if (updatedState.status === 'playing') {
-            updatedState = nextTurn(updatedState);
-          }
+          break;
         }
-        break;
-      }
 
-      case 'PLAY_ACTION': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
+        case 'PLAY_ACTION': {
+          if (updatedState.status !== 'playing') {
+            console.warn('❌ Action rejected: Game status is not playing');
+            return;
+          }
+          if (updatedState.currentTurn !== playerIndex) {
+            console.warn(`❌ Action rejected: Not your turn! Active: ${updatedState.currentTurn}, You: ${playerIndex}`);
+            return;
+          }
 
-        const { cardId, targetPlayerId, x, y, toolToRepair } = action.payload;
-        const cardIndex = player.hand.findIndex(c => c.id === cardId);
-        if (cardIndex === -1) return;
-        const card = player.hand[cardIndex] as ActionCard;
+          const { cardId, targetPlayerId, x, y, toolToRepair } = action.payload;
 
-        const targetPlayer = updatedState.players.find(p => p.id === targetPlayerId);
+          // Обработка активных массовых действий без привязки к конкретной карте на руках (так как они сбрасываются при активации)
+          if (updatedState.massActionState?.active) {
+            if (updatedState.massActionState.type === 'double_cave_in') {
+              if (x === undefined || y === undefined) return;
+              const targetCoord = `${x},${y}`;
+              const targetPlaced = updatedState.grid[targetCoord];
 
-        if (card.actionType === 'break_tool') {
-          if (!targetPlayer || !card.toolType) return;
-          if (targetPlayer.brokenTools.includes(card.toolType)) return;
+              if (!targetPlaced || targetPlaced.isEntrance || targetPlaced.isGoal) return;
 
-          targetPlayer.brokenTools.push(card.toolType);
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
+              delete updatedState.grid[targetCoord];
+              updatedState = addLog(updatedState, `${player.name} устроил обвал на (${x}, ${y})`, 'warning');
 
-          const toolName = card.toolType === 'lamp' ? 'фонарь' : card.toolType === 'cart' ? 'вагонетку' : 'кирку';
-          updatedState = addLog(updatedState, `${player.name} сломал ${toolName} игроку ${targetPlayer.name}`, 'warning');
+              updatedState.massActionState.caveInsDone += 1;
+              if (updatedState.massActionState.caveInsDone >= 2) {
+                player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+                updatedState = addLog(updatedState, `Двойной обвал завершен! Лимит руки уменьшен до ${player.maxHandSize}`, 'warning');
+                
+                while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                  player.hand.push(updatedState.deck.pop()!);
+                }
+                player.handSize = player.hand.length;
+                updatedState.deckCount = updatedState.deck.length;
 
-        } else if (card.actionType === 'repair_tool') {
-          if (!targetPlayer) return;
-          let repairTool: ToolType | undefined = card.toolType || toolToRepair;
+                updatedState.massActionState = undefined;
+                if (updatedState.status === 'playing') {
+                  updatedState = nextTurn(updatedState);
+                }
+              }
+              break;
+            }
 
-          if (!repairTool || !targetPlayer.brokenTools.includes(repairTool)) return;
+            if (updatedState.massActionState.type === 'double_map') {
+              if (x === undefined || y === undefined) return;
+              const targetGoal = updatedState.goals.find(g => g.x === x && g.y === y);
+              if (!targetGoal || targetGoal.flipped) return;
 
-          targetPlayer.brokenTools = targetPlayer.brokenTools.filter(t => t !== repairTool);
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
+              updatedState.revealedGoals[`${x},${y}_${senderId}`] = true;
+              updatedState = addLog(updatedState, `${player.name} тайно посмотрел карту цели`, 'info');
 
-          const toolName = repairTool === 'lamp' ? 'фонарь' : repairTool === 'cart' ? 'вагонетку' : 'кирку';
-          updatedState = addLog(updatedState, `${player.name} починил ${toolName} игроку ${targetPlayer.name}`, 'success');
+              updatedState.massActionState.mapsViewed += 1;
+              if (updatedState.massActionState.mapsViewed >= 2) {
+                while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                  player.hand.push(updatedState.deck.pop()!);
+                }
+                player.handSize = player.hand.length;
+                updatedState.deckCount = updatedState.deck.length;
 
-        } else if (card.actionType === 'view_role') {
-          if (!targetPlayer) return;
-          updatedState.revealedRoles[`${targetPlayer.id}_${senderId}`] = true;
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
-          updatedState = addLog(updatedState, `${player.name} тайно посмотрел роль ${targetPlayer.name}`, 'info');
+                updatedState.massActionState = undefined;
+                if (updatedState.status === 'playing') {
+                  updatedState = nextTurn(updatedState);
+                }
+              }
+              break;
+            }
+          }
 
-        } else if (card.actionType === 'swap_roles') {
-          const tPlayer = targetPlayer || player;
-          if (updatedState.unusedRoles.length > 0) {
-            const oldRole = tPlayer.role;
-            const newRole = updatedState.unusedRoles.pop()!;
-            tPlayer.role = newRole;
-            if (oldRole) updatedState.unusedRoles.push(oldRole);
-            updatedState.unusedRoles.sort(() => Math.random() - 0.5);
+          const cardIndex = player.hand.findIndex(c => c.id === cardId);
+          if (cardIndex === -1) {
+            console.warn('❌ Action rejected: Action card not found in hand:', cardId);
+            return;
+          }
+          const card = player.hand[cardIndex] as ActionCard;
+          const targetPlayer = updatedState.players.find(p => p.id === targetPlayerId);
 
+          if (card.actionType === 'break_tool') {
+            if (!targetPlayer || !card.toolType) return;
+            if (targetPlayer.brokenTools.includes(card.toolType)) return;
+
+            targetPlayer.brokenTools.push(card.toolType);
             player.hand.splice(cardIndex, 1);
             player.handSize = player.hand.length;
             updatedState.discardPile.push(card);
-            
-            updatedState = addLog(updatedState, `${player.name} применил смену роли для ${tPlayer.name}`, 'warning');
 
-            const roleRu = newRole === 'miner' ? 'Шахтер ⛏️' : newRole === 'geologist' ? 'Геолог 💎' : 'Вредитель 👺';
-            updatedState.logs = [{
-              id: Math.random().toString(36).substring(2, 9),
-              timestamp: new Date().toLocaleTimeString(),
-              message: `[СЕКРЕТНО] Ваша новая роль: ${roleRu}!`,
-              type: 'success',
-              privateFor: tPlayer.id
-            }, ...updatedState.logs];
-          }
+            const toolName = card.toolType === 'lamp' ? 'фонарь' : card.toolType === 'cart' ? 'вагонетку' : 'кирку';
+            updatedState = addLog(updatedState, `${player.name} сломал ${toolName} игроку ${targetPlayer.name}`, 'warning');
 
-        } else if (card.actionType === 'swap_cards') {
-          if (!targetPlayer || targetPlayer.id === senderId) return;
-          const tempHand = [...player.hand];
-          tempHand.splice(cardIndex, 1);
+          } else if (card.actionType === 'repair_tool') {
+            if (!targetPlayer) return;
+            let repairTool: ToolType | undefined = card.toolType || toolToRepair;
 
-          player.hand = [...targetPlayer.hand];
-          targetPlayer.hand = tempHand;
+            if (!repairTool || !targetPlayer.brokenTools.includes(repairTool)) return;
 
-          player.handSize = player.hand.length;
-          targetPlayer.handSize = targetPlayer.hand.length;
+            targetPlayer.brokenTools = targetPlayer.brokenTools.filter(t => t !== repairTool);
+            player.hand.splice(cardIndex, 1);
+            player.handSize = player.hand.length;
+            updatedState.discardPile.push(card);
 
-          updatedState.discardPile.push(card);
-          updatedState = addLog(updatedState, `${player.name} поменялся картами с ${targetPlayer.name}!`, 'warning');
+            const toolName = repairTool === 'lamp' ? 'фонарь' : repairTool === 'cart' ? 'вагонетку' : 'кирку';
+            updatedState = addLog(updatedState, `${player.name} починил ${toolName} игроку ${targetPlayer.name}`, 'success');
 
-        } else if (card.actionType === 'tic_tac_toe') {
-          if (!targetPlayer || targetPlayer.id === senderId) return;
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
+          } else if (card.actionType === 'view_role') {
+            if (!targetPlayer) return;
+            updatedState.revealedRoles[`${targetPlayer.id}_${senderId}`] = true;
+            player.hand.splice(cardIndex, 1);
+            player.handSize = player.hand.length;
+            updatedState.discardPile.push(card);
+            updatedState = addLog(updatedState, `${player.name} тайно посмотрел роль ${targetPlayer.name}`, 'info');
 
-          updatedState.tttState = {
-            active: true,
-            challengerId: senderId,
-            targetId: targetPlayer.id,
-            board: Array(9).fill(null),
-            currentTurnId: senderId,
-            timeLimit: card.tttDuration || 15,
-            timeLeft: card.tttDuration || 15,
-          };
+          } else if (card.actionType === 'swap_roles') {
+            const tPlayer = targetPlayer || player;
+            if (updatedState.unusedRoles.length > 0) {
+              const oldRole = tPlayer.role;
+              const newRole = updatedState.unusedRoles.pop()!;
+              tPlayer.role = newRole;
+              if (oldRole) updatedState.unusedRoles.push(oldRole);
+              updatedState.unusedRoles.sort(() => Math.random() - 0.5);
 
-          updatedState = addLog(updatedState, `⚔️ ${player.name} вызвал ${targetPlayer.name} на дуэль в Крестики-Нолики!`, 'error');
-          startTTTTimer();
-
-        } else if (card.actionType === 'cave_in') {
-          if (x === undefined || y === undefined) return;
-          const targetCoord = `${x},${y}`;
-          const targetPlaced = updatedState.grid[targetCoord];
-
-          if (!targetPlaced || targetPlaced.isEntrance || targetPlaced.isGoal) return;
-
-          delete updatedState.grid[targetCoord];
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
-
-          updatedState = addLog(updatedState, `${player.name} устроил обвал на (${x}, ${y})`, 'warning');
-
-          if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_cave_in') {
-            updatedState.massActionState.caveInsDone += 1;
-            if (updatedState.massActionState.caveInsDone >= 2) {
-              player.maxHandSize = Math.max(2, player.maxHandSize - 1);
-              updatedState = addLog(updatedState, `Двойной обвал завершен! Лимит руки уменьшен до ${player.maxHandSize}`, 'warning');
+              player.hand.splice(cardIndex, 1);
+              player.handSize = player.hand.length;
+              updatedState.discardPile.push(card);
               
-              while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
-                player.hand.push(updatedState.deck.pop()!);
-              }
-              player.handSize = player.hand.length;
-              updatedState.deckCount = updatedState.deck.length;
+              updatedState = addLog(updatedState, `${player.name} применил смену роли для ${tPlayer.name}`, 'warning');
 
-              updatedState.massActionState = undefined;
-              if (updatedState.status === 'playing') {
-                updatedState = nextTurn(updatedState);
+              const roleRu = newRole === 'miner' ? 'Шахтер ⛏️' : newRole === 'geologist' ? 'Геолог 💎' : 'Вредитель 👺';
+              updatedState.logs = [{
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString(),
+                message: `[СЕКРЕТНО] Ваша новая роль: ${roleRu}!`,
+                type: 'success',
+                privateFor: tPlayer.id
+              }, ...updatedState.logs];
+            }
+
+          } else if (card.actionType === 'swap_cards') {
+            if (!targetPlayer || targetPlayer.id === senderId) return;
+            const tempHand = [...player.hand];
+            tempHand.splice(cardIndex, 1);
+
+            player.hand = [...targetPlayer.hand];
+            targetPlayer.hand = tempHand;
+
+            player.handSize = player.hand.length;
+            targetPlayer.handSize = targetPlayer.hand.length;
+
+            updatedState.discardPile.push(card);
+            updatedState = addLog(updatedState, `${player.name} поменялся картами с ${targetPlayer.name}!`, 'warning');
+
+          } else if (card.actionType === 'tic_tac_toe') {
+            if (!targetPlayer || targetPlayer.id === senderId) return;
+            player.hand.splice(cardIndex, 1);
+            player.handSize = player.hand.length;
+            updatedState.discardPile.push(card);
+
+            updatedState.tttState = {
+              active: true,
+              challengerId: senderId,
+              targetId: targetPlayer.id,
+              board: Array(9).fill(null),
+              currentTurnId: senderId,
+              timeLimit: card.tttDuration || 15,
+              timeLeft: card.tttDuration || 15,
+            };
+
+            updatedState = addLog(updatedState, `⚔️ ${player.name} вызвал ${targetPlayer.name} на дуэль в Крестики-Нолики!`, 'error');
+            startTTTTimer();
+
+          } else if (card.actionType === 'cave_in') {
+            if (x === undefined || y === undefined) return;
+            const targetCoord = `${x},${y}`;
+            const targetPlaced = updatedState.grid[targetCoord];
+
+            if (!targetPlaced || targetPlaced.isEntrance || targetPlaced.isGoal) return;
+
+            delete updatedState.grid[targetCoord];
+            player.hand.splice(cardIndex, 1);
+            player.handSize = player.hand.length;
+            updatedState.discardPile.push(card);
+
+            updatedState = addLog(updatedState, `${player.name} устроил обвал на (${x}, ${y})`, 'warning');
+
+            if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_cave_in') {
+              updatedState.massActionState.caveInsDone += 1;
+              if (updatedState.massActionState.caveInsDone >= 2) {
+                player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+                updatedState = addLog(updatedState, `Двойной обвал завершен! Лимит руки уменьшен до ${player.maxHandSize}`, 'warning');
+                
+                while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                  player.hand.push(updatedState.deck.pop()!);
+                }
+                player.handSize = player.hand.length;
+                updatedState.deckCount = updatedState.deck.length;
+
+                updatedState.massActionState = undefined;
+                if (updatedState.status === 'playing') {
+                  updatedState = nextTurn(updatedState);
+                }
+              }
+            }
+
+          } else if (card.actionType === 'map') {
+            if (x === undefined || y === undefined) return;
+            const targetGoal = updatedState.goals.find(g => g.x === x && g.y === y);
+            if (!targetGoal || targetGoal.flipped) return;
+
+            updatedState.revealedGoals[`${x},${y}_${senderId}`] = true;
+            player.hand.splice(cardIndex, 1);
+            player.handSize = player.hand.length;
+            updatedState.discardPile.push(card);
+
+            updatedState = addLog(updatedState, `${player.name} тайно посмотрел карту цели`, 'info');
+
+            if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_map') {
+              updatedState.massActionState.mapsViewed += 1;
+              if (updatedState.massActionState.mapsViewed >= 2) {
+                while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+                  player.hand.push(updatedState.deck.pop()!);
+                }
+                player.handSize = player.hand.length;
+                updatedState.deckCount = updatedState.deck.length;
+
+                updatedState.massActionState = undefined;
+                if (updatedState.status === 'playing') {
+                  updatedState = nextTurn(updatedState);
+                }
               }
             }
           }
 
-        } else if (card.actionType === 'map') {
-          if (x === undefined || y === undefined) return;
-          const targetGoal = updatedState.goals.find(g => g.x === x && g.y === y);
-          if (!targetGoal || targetGoal.flipped) return;
-
-          updatedState.revealedGoals[`${x},${y}_${senderId}`] = true;
-          player.hand.splice(cardIndex, 1);
-          player.handSize = player.hand.length;
-          updatedState.discardPile.push(card);
-
-          updatedState = addLog(updatedState, `${player.name} тайно посмотрел карту цели`, 'info');
-
-          if (updatedState.massActionState?.active && updatedState.massActionState.type === 'double_map') {
-            updatedState.massActionState.mapsViewed += 1;
-            if (updatedState.massActionState.mapsViewed >= 2) {
-              while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
-                player.hand.push(updatedState.deck.pop()!);
-              }
-              player.handSize = player.hand.length;
-              updatedState.deckCount = updatedState.deck.length;
-
-              updatedState.massActionState = undefined;
-              if (updatedState.status === 'playing') {
-                updatedState = nextTurn(updatedState);
-              }
+          if (!updatedState.massActionState) {
+            if (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+              player.hand.push(updatedState.deck.pop()!);
             }
+            player.handSize = player.hand.length;
+            updatedState.deckCount = updatedState.deck.length;
+
+            updatedState = nextTurn(updatedState);
           }
+          break;
         }
 
-        if (!updatedState.massActionState) {
-          if (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+        case 'ACTIVATE_MASS_ACTION': {
+          if (updatedState.status !== 'playing' || updatedState.currentTurn !== playerIndex) return;
+          const { type, cardId1, cardId2 } = action.payload;
+
+          if (type === 'double_tunnel') {
+            updatedState.massActionState = { active: true, type: 'double_tunnel', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+            updatedState = addLog(updatedState, `${player.name} готовит массовую постройку двух туннелей за -1 к лимиту руки`, 'warning');
+          } else if (type === 'double_cave_in' && cardId1 && cardId2) {
+            const idx1 = player.hand.findIndex(c => c.id === cardId1);
+            const idx2 = player.hand.findIndex(c => c.id === cardId2);
+            if (idx1 !== -1 && idx2 !== -1) {
+              updatedState.discardPile.push(player.hand.splice(Math.max(idx1, idx2), 1)[0]);
+              updatedState.discardPile.push(player.hand.splice(Math.min(idx1, idx2), 1)[0]);
+              player.handSize = player.hand.length;
+
+              updatedState.massActionState = { active: true, type: 'double_cave_in', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+              updatedState = addLog(updatedState, `${player.name} пожертвовал картой и активировал Двойной Обвал (выберите 2 цели на поле)`, 'warning');
+            }
+          } else if (type === 'double_map' && cardId1 && cardId2) {
+            const idx1 = player.hand.findIndex(c => c.id === cardId1);
+            const idx2 = player.hand.findIndex(c => c.id === cardId2);
+            if (idx1 !== -1 && idx2 !== -1) {
+              updatedState.discardPile.push(player.hand.splice(Math.max(idx1, idx2), 1)[0]);
+              updatedState.discardPile.push(player.hand.splice(Math.min(idx1, idx2), 1)[0]);
+              player.handSize = player.hand.length;
+
+              updatedState.massActionState = { active: true, type: 'double_map', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
+              updatedState = addLog(updatedState, `${player.name} сыграл 2 Секретных карты целей (выберите 2 цели на поле)`, 'info');
+            }
+          }
+          break;
+        }
+
+        case 'CONFIRM_MASS_ACTION': {
+          if (!updatedState.massActionState || updatedState.currentTurn !== playerIndex) return;
+          const m = updatedState.massActionState;
+
+          if (m.type === 'double_tunnel' || m.type === 'double_cave_in') {
+            player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+          }
+
+          while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
+            player.hand.push(updatedState.deck.pop()!);
+          }
+          player.handSize = player.hand.length;
+          updatedState.deckCount = updatedState.deck.length;
+
+          updatedState.massActionState = undefined;
+          updatedState = nextTurn(updatedState);
+          break;
+        }
+
+        case 'TRANSFORM_CARD': {
+          const { cardId, targetType, cost } = action.payload;
+          if (player.goldResources < cost) return;
+
+          const cardIdx = player.hand.findIndex(c => c.id === cardId);
+          if (cardIdx === -1) return;
+
+          player.goldResources -= cost;
+          player.hand[cardIdx] = transformCard(player.hand[cardIdx], targetType);
+          updatedState = addLog(updatedState, `${player.name} потратил ${cost} золота на преобразование карты в руке`, 'success');
+          break;
+        }
+
+        case 'TTT_MOVE': {
+          if (!updatedState.tttState) return;
+          const ttt = updatedState.tttState;
+          if (ttt.currentTurnId !== senderId) return;
+
+          const { cellIndex } = action.payload;
+          if (ttt.board[cellIndex] !== null) return;
+
+          const mark = senderId === ttt.challengerId ? 'X' : 'O';
+          ttt.board[cellIndex] = mark;
+
+          const winnerMark = checkTTTWinner(ttt.board);
+          if (winnerMark) {
+            const winnerId = winnerMark === 'X' ? ttt.challengerId : ttt.targetId;
+            const loserId = winnerId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
+
+            const winnerObj = updatedState.players.find(p => p.id === winnerId);
+            const loserObj = updatedState.players.find(p => p.id === loserId);
+
+            if (winnerObj && loserObj) {
+              winnerObj.goldResources += 3;
+              loserObj.brokenTools = ['lamp', 'cart', 'pickaxe'];
+              updatedState = addLog(updatedState, `🎉 ${winnerObj.name} победил в Крестики-Нолики! Получено 3 золота. У ${loserObj.name} сломаны все инструменты!`, 'success');
+            }
+
+            if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+            updatedState.tttState = undefined;
+            updatedState = nextTurn(updatedState);
+          } else if (isTTTBoardFull(ttt.board)) {
+            if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
+            ttt.isSpinningWheel = true;
+            updatedState = addLog(updatedState, `Ничья! Запускается Колесо Фортуны!`, 'warning');
+            broadcastState(updatedState);
+
+            setTimeout(() => {
+              resolveTTTWheel();
+            }, 3000);
+            return;
+          } else {
+            ttt.currentTurnId = senderId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
+          }
+          break;
+        }
+
+        case 'DISCARD': {
+          if (updatedState.status !== 'playing') return;
+          if (updatedState.currentTurn !== playerIndex) return;
+
+          const { cardIds } = action.payload;
+          if (!cardIds || cardIds.length === 0) return;
+
+          cardIds.forEach(id => {
+            const cardIndex = player.hand.findIndex(c => c.id === id);
+            if (cardIndex !== -1) {
+              const discardedCard = player.hand.splice(cardIndex, 1)[0];
+              updatedState.discardPile.push(discardedCard);
+            }
+          });
+          player.handSize = player.hand.length;
+
+          updatedState = addLog(updatedState, `${player.name} сбросил карт: ${cardIds.length}`, 'info');
+
+          while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
             player.hand.push(updatedState.deck.pop()!);
           }
           player.handSize = player.hand.length;
           updatedState.deckCount = updatedState.deck.length;
 
           updatedState = nextTurn(updatedState);
+          break;
         }
-        break;
-      }
-
-      case 'ACTIVATE_MASS_ACTION': {
-        if (updatedState.status !== 'playing' || updatedState.currentTurn !== playerIndex) return;
-        const { type, cardId1, cardId2 } = action.payload;
-
-        if (type === 'double_tunnel') {
-          updatedState.massActionState = { active: true, type: 'double_tunnel', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
-          updatedState = addLog(updatedState, `${player.name} готовит массовую постройку двух туннелей за -1 к лимиту руки`, 'warning');
-        } else if (type === 'double_cave_in' && cardId1 && cardId2) {
-          const idx1 = player.hand.findIndex(c => c.id === cardId1);
-          const idx2 = player.hand.findIndex(c => c.id === cardId2);
-          if (idx1 !== -1 && idx2 !== -1) {
-            updatedState.discardPile.push(player.hand.splice(Math.max(idx1, idx2), 1)[0]);
-            updatedState.discardPile.push(player.hand.splice(Math.min(idx1, idx2), 1)[0]);
-            player.handSize = player.hand.length;
-
-            updatedState.massActionState = { active: true, type: 'double_cave_in', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
-            updatedState = addLog(updatedState, `${player.name} пожертвовал картой и активировал Двойной Обвал (выберите 2 цели на поле)`, 'warning');
-          }
-        } else if (type === 'double_map' && cardId1 && cardId2) {
-          const idx1 = player.hand.findIndex(c => c.id === cardId1);
-          const idx2 = player.hand.findIndex(c => c.id === cardId2);
-          if (idx1 !== -1 && idx2 !== -1) {
-            updatedState.discardPile.push(player.hand.splice(Math.max(idx1, idx2), 1)[0]);
-            updatedState.discardPile.push(player.hand.splice(Math.min(idx1, idx2), 1)[0]);
-            player.handSize = player.hand.length;
-
-            updatedState.massActionState = { active: true, type: 'double_map', tunnelsPlaced: 0, caveInsDone: 0, mapsViewed: 0 };
-            updatedState = addLog(updatedState, `${player.name} сыграл 2 Секретных карты целей (выберите 2 цели на поле)`, 'info');
-          }
-        }
-        break;
-      }
-
-      case 'CONFIRM_MASS_ACTION': {
-        if (!updatedState.massActionState || updatedState.currentTurn !== playerIndex) return;
-        const m = updatedState.massActionState;
-
-        if (m.type === 'double_tunnel' || m.type === 'double_cave_in') {
-          player.maxHandSize = Math.max(2, player.maxHandSize - 1);
-        }
-
-        while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
-          player.hand.push(updatedState.deck.pop()!);
-        }
-        player.handSize = player.hand.length;
-        updatedState.deckCount = updatedState.deck.length;
-
-        updatedState.massActionState = undefined;
-        updatedState = nextTurn(updatedState);
-        break;
-      }
-
-      case 'TRANSFORM_CARD': {
-        const { cardId, targetType, cost } = action.payload;
-        if (player.goldResources < cost) return;
-
-        const cardIdx = player.hand.findIndex(c => c.id === cardId);
-        if (cardIdx === -1) return;
-
-        player.goldResources -= cost;
-        player.hand[cardIdx] = transformCard(player.hand[cardIdx], targetType);
-        updatedState = addLog(updatedState, `${player.name} потратил ${cost} золота на преобразование карты в руке`, 'success');
-        break;
-      }
-
-      case 'TTT_MOVE': {
-        if (!updatedState.tttState) return;
-        const ttt = updatedState.tttState;
-        if (ttt.currentTurnId !== senderId) return;
-
-        const { cellIndex } = action.payload;
-        if (ttt.board[cellIndex] !== null) return;
-
-        const mark = senderId === ttt.challengerId ? 'X' : 'O';
-        ttt.board[cellIndex] = mark;
-
-        const winnerMark = checkTTTWinner(ttt.board);
-        if (winnerMark) {
-          const winnerId = winnerMark === 'X' ? ttt.challengerId : ttt.targetId;
-          const loserId = winnerId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
-
-          const winnerObj = updatedState.players.find(p => p.id === winnerId);
-          const loserObj = updatedState.players.find(p => p.id === loserId);
-
-          if (winnerObj && loserObj) {
-            winnerObj.goldResources += 3;
-            loserObj.brokenTools = ['lamp', 'cart', 'pickaxe'];
-            updatedState = addLog(updatedState, `🎉 ${winnerObj.name} победил в Крестики-Нолики! Получено 3 золота. У ${loserObj.name} сломаны все инструменты!`, 'success');
-          }
-
-          if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
-          updatedState.tttState = undefined;
-          updatedState = nextTurn(updatedState);
-        } else if (isTTTBoardFull(ttt.board)) {
-          if (tttTimerIntervalRef.current) clearInterval(tttTimerIntervalRef.current);
-          ttt.isSpinningWheel = true;
-          updatedState = addLog(updatedState, `Ничья! Запускается Колесо Фортуны!`, 'warning');
-          broadcastState(updatedState);
-
-          setTimeout(() => {
-            resolveTTTWheel();
-          }, 3000);
-          return;
-        } else {
-          ttt.currentTurnId = senderId === ttt.challengerId ? ttt.targetId : ttt.challengerId;
-        }
-        break;
-      }
-
-      case 'DISCARD': {
-        if (updatedState.status !== 'playing') return;
-        if (updatedState.currentTurn !== playerIndex) return;
-
-        const { cardIds } = action.payload;
-        if (!cardIds || cardIds.length === 0) return;
-
-        cardIds.forEach(id => {
-          const cardIndex = player.hand.findIndex(c => c.id === id);
-          if (cardIndex !== -1) {
-            const discardedCard = player.hand.splice(cardIndex, 1)[0];
-            updatedState.discardPile.push(discardedCard);
-          }
-        });
-        player.handSize = player.hand.length;
-
-        updatedState = addLog(updatedState, `${player.name} сбросил карт: ${cardIds.length}`, 'info');
-
-        while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
-          player.hand.push(updatedState.deck.pop()!);
-        }
-        player.handSize = player.hand.length;
-        updatedState.deckCount = updatedState.deck.length;
-
-        updatedState = nextTurn(updatedState);
-        break;
-      }
 
       case 'REPAIR_SELF_WITH_DISCARD': {
         if (updatedState.status !== 'playing') return;
@@ -825,8 +942,11 @@ export const usePeerGame = () => {
         player.brokenTools.splice(toolIdx, 1);
         player.handSize = player.hand.length;
 
+        // Самосброс 2-х карт для починки уменьшает максимальный лимит руки на 1 (правило Saboteur 2)
+        player.maxHandSize = Math.max(2, player.maxHandSize - 1);
+
         const toolNameRu = toolToRepair === 'lamp' ? 'Фонарь' : toolToRepair === 'cart' ? 'Вагонетку' : 'Кирку';
-        updatedState = addLog(updatedState, `${player.name} сбросил 2 карты и починил свой инструмент: ${toolNameRu}`, 'success');
+        updatedState = addLog(updatedState, `${player.name} сбросил 2 карты (лимит руки -1) и починил свой инструмент: ${toolNameRu}`, 'success');
 
         while (player.hand.length < player.maxHandSize && updatedState.deck.length > 0) {
           player.hand.push(updatedState.deck.pop()!);
@@ -838,32 +958,47 @@ export const usePeerGame = () => {
         break;
       }
 
-      case 'SEND_CHAT': {
-        const { message } = action.payload;
-        updatedState = addLog(updatedState, message, 'chat', player.name);
-        break;
-      }
-
-      case 'NEXT_ROUND': {
-        if (senderId !== updatedState.hostId) return;
-        if (updatedState.round >= 3) {
-          updatedState.status = 'game_end';
-          updatedState = addLog(updatedState, 'Игра завершена по итогам 3-х раундов!', 'success');
-        } else {
-          updatedState = startRound(updatedState, updatedState.round + 1);
+        case 'SEND_CHAT': {
+          const { message } = action.payload;
+          updatedState = addLog(updatedState, message, 'chat', player.name);
+          break;
         }
-        break;
-      }
 
-      case 'RESTART_GAME': {
-        if (senderId !== updatedState.hostId) return;
-        updatedState.players.forEach(p => p.score = 0);
-        updatedState = startRound(updatedState, 1);
-        break;
+        case 'NEXT_ROUND': {
+          if (senderId !== updatedState.hostId) return;
+          if (updatedState.round >= 3) {
+            updatedState.status = 'game_end';
+            updatedState = addLog(updatedState, 'Игра завершена по итогам 3-х раундов!', 'success');
+          } else {
+            updatedState = startRound(updatedState, updatedState.round + 1);
+          }
+          break;
+        }
+
+        case 'RESTART_GAME': {
+          if (senderId !== updatedState.hostId) return;
+          updatedState.players.forEach(p => p.score = 0);
+          updatedState = startRound(updatedState, 1);
+          break;
+        }
       }
+    } catch (error: any) {
+      console.error('❌ CRASH inside handleNetworkAction:', error);
+      // Ошибка логируется и отправляется на экран всем игрокам, предотвращая вечную "заморозку" игры
+      updatedState = addLog(updatedState, `System Error: ${error.message || error}`, 'error');
     }
 
-    broadcastState(updatedState);
+    // Если отправитель — гость, делаем искусственную задержку (100мс) перед отправкой STATE_UPDATE.
+    // Это дает WebSocket-серверу время полностью разгрузить буферы после CLIENT_ACTION и исключает гонку сетевых пакетов на Radmin VPN.
+    const isActionFromGuest = senderId !== myPlayerIdRef.current;
+    if (isActionFromGuest) {
+      console.log('⏱️ Delaying broadcast State Update by 100ms for Guest network stability...');
+      setTimeout(() => {
+        broadcastState(updatedState);
+      }, 100);
+    } else {
+      broadcastState(updatedState);
+    }
   };
 
   const startRound = (state: GameState, roundNum: number): GameState => {
@@ -1097,9 +1232,12 @@ export const usePeerGame = () => {
   };
 
   const clientSendAction = (action: NetworkAction) => {
+    console.log('🔌 sendAction called:', action.type, action);
     if (isHost) {
+      console.log('👑 Host is executing local network action directly...');
       handleNetworkAction(myPlayerIdRef.current, action);
     } else {
+      console.log('📡 Guest is transmitting CLIENT_ACTION packet to WS server...');
       wsRef.current?.send(JSON.stringify({
         type: 'CLIENT_ACTION',
         roomId: roomCode,

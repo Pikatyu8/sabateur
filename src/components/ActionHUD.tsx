@@ -91,7 +91,7 @@ export default function ActionHUD({
 
         {/* Панель выбранных карт и действий */}
         <div className="w-full md:w-80 bg-stone-950 p-3 rounded-lg border border-amber-900/20 shrink-0 flex flex-col justify-between h-[200px] md:h-full overflow-y-auto">
-          {selectedCardIds.length === 0 ? (
+          {selectedCardIds.length === 0 && !gameState.massActionState?.active ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-4 select-none">
               <span className="text-[10px] font-mono uppercase text-stone-600 tracking-wider mb-1">Панель действий</span>
               <p className="text-[11px] text-stone-500 font-mono leading-snug">
@@ -107,7 +107,7 @@ export default function ActionHUD({
                     <span className="text-xs font-bold text-stone-200">{selectedCard?.name}</span>
                     <p className="text-[10px] text-stone-400 leading-snug">{selectedCard && 'description' in selectedCard ? selectedCard.description : ''}</p>
                     
-                    {/* КЛАССИЧЕСКАЯ ПОЛОМКА И ПОЧИНКА (ВОССТАНОВЛЕНО) */}
+                    {/* КЛАССИЧЕСКАЯ ПОЛОМКА И ПОЧИНКА */}
                     {selectedCard?.type === 'action' && selectedCard.actionType === 'break_tool' && (
                       <div className="mt-2 flex flex-col gap-1">
                         <span className="text-[8px] font-mono text-stone-500 uppercase">Сломать {selectedCard.toolType === 'lamp' ? 'Фонарь' : selectedCard.toolType === 'cart' ? 'Вагонетку' : 'Кирку'}:</span>
@@ -284,7 +284,7 @@ export default function ActionHUD({
                               sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
                               setSelectedCardIds([]);
                             }}
-                            className="text-[9px] bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 p-1 rounded text-stone-200 font-mono"
+                            className="text-[9px] bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 p-1 rounded text-stone-200 font-mono cursor-pointer"
                           >
                             {p.name}
                           </button>
@@ -300,7 +300,7 @@ export default function ActionHUD({
                             sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: myPlayerId } });
                             setSelectedCardIds([]);
                           }}
-                          className="text-[9px] bg-pink-950 hover:bg-pink-900 border border-pink-800 p-1 rounded text-stone-200 font-mono"
+                          className="text-[9px] bg-pink-950 hover:bg-pink-900 border border-pink-800 p-1 rounded text-stone-200 font-mono cursor-pointer"
                         >
                           Сменить себе (Вы)
                         </button>
@@ -311,7 +311,7 @@ export default function ActionHUD({
                               sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
                               setSelectedCardIds([]);
                             }}
-                            className="text-[9px] bg-pink-950 hover:bg-pink-900 border border-pink-800 p-1 rounded text-stone-200 font-mono"
+                            className="text-[9px] bg-pink-950 hover:bg-pink-900 border border-pink-800 p-1 rounded text-stone-200 font-mono cursor-pointer"
                           >
                             Сменить {p.name}
                           </button>
@@ -329,7 +329,7 @@ export default function ActionHUD({
                               sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
                               setSelectedCardIds([]);
                             }}
-                            className="text-[9px] bg-teal-950 hover:bg-teal-900 border border-teal-800 p-1 rounded text-stone-200 font-mono"
+                            className="text-[9px] bg-teal-950 hover:bg-teal-900 border border-teal-800 p-1 rounded text-stone-200 font-mono cursor-pointer"
                           >
                             Обменяться с {p.name}
                           </button>
@@ -347,7 +347,7 @@ export default function ActionHUD({
                               sendAction({ type: 'PLAY_ACTION', payload: { cardId: selectedCard.id, targetPlayerId: p.id } });
                               setSelectedCardIds([]);
                             }}
-                            className="text-[9px] bg-yellow-950 hover:bg-yellow-900 border border-yellow-800 p-1 rounded text-stone-200 font-mono"
+                            className="text-[9px] bg-yellow-950 hover:bg-yellow-900 border border-yellow-800 p-1 rounded text-stone-200 font-mono cursor-pointer"
                           >
                             Вызвать {p.name}
                           </button>
@@ -365,7 +365,7 @@ export default function ActionHUD({
                           sendAction({ type: 'ACTIVATE_MASS_ACTION', payload: { type: 'double_tunnel' } });
                           setSelectedCardIds([]);
                         }}
-                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-amber-800 to-amber-950 border border-amber-600 text-stone-100 py-1.5 rounded"
+                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-amber-800 to-amber-950 border border-amber-600 text-stone-100 py-1.5 rounded cursor-pointer"
                       >
                         Двойной путь (Лимит руки -1)
                       </button>
@@ -377,7 +377,7 @@ export default function ActionHUD({
                           sendAction({ type: 'ACTIVATE_MASS_ACTION', payload: { type: 'double_cave_in', cardId1: selectedCardIds[0], cardId2: selectedCardIds[1] } });
                           setSelectedCardIds([]);
                         }}
-                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-red-950 to-stone-950 border border-red-700 text-stone-100 py-1.5 rounded"
+                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-red-950 to-stone-950 border border-red-700 text-stone-100 py-1.5 rounded cursor-pointer"
                       >
                         Двойной Обвал (Лимит руки -1)
                       </button>
@@ -389,10 +389,36 @@ export default function ActionHUD({
                           sendAction({ type: 'ACTIVATE_MASS_ACTION', payload: { type: 'double_map', cardId1: selectedCardIds[0], cardId2: selectedCardIds[1] } });
                           setSelectedCardIds([]);
                         }}
-                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-sky-950 to-stone-950 border border-sky-700 text-stone-100 py-1.5 rounded"
+                        className="w-full text-xs font-mono font-bold uppercase bg-gradient-to-r from-sky-950 to-stone-950 border border-sky-700 text-stone-100 py-1.5 rounded cursor-pointer"
                       >
                         Двойной Просмотр (Без штрафа)
                       </button>
+                    )}
+
+                    {/* САМОПОЧИНКА СБРОСОМ 2 КАРТ (Добавлено: Управление саморемонтом) */}
+                    {me.brokenTools.length > 0 && (
+                      <div className="mt-2 flex flex-col gap-1 border-t border-stone-800/60 pt-1.5 w-full">
+                        <span className="text-[8px] font-mono text-stone-500 uppercase leading-snug">Починить свой инструмент (Сбросить 2 карты, лимит руки -1):</span>
+                        {me.brokenTools.map(tool => {
+                          const toolNameRu = tool === 'lamp' ? 'Фонарь' : tool === 'cart' ? 'Вагонетку' : 'Кирку';
+                          return (
+                            <button
+                              key={tool}
+                              onClick={() => {
+                                sendAction({
+                                  type: 'REPAIR_SELF_WITH_DISCARD',
+                                  payload: { cardIds: selectedCardIds, toolToRepair: tool }
+                                });
+                                setSelectedCardIds([]);
+                              }}
+                              className="w-full text-left px-2 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800 text-emerald-200 text-[9px] font-mono rounded cursor-pointer flex justify-between items-center transition-colors"
+                            >
+                              <span>🛠️ Починить {toolNameRu}</span>
+                              <span className="text-[8px] opacity-65 font-bold">Лимит -1</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
                   </>
                 )}
@@ -400,20 +426,25 @@ export default function ActionHUD({
 
               {gameState.massActionState?.active && (
                 <button
-                  onClick={() => sendAction({ type: 'CONFIRM_MASS_ACTION' })}
-                  className="w-full py-1.5 bg-emerald-900 border border-emerald-600 text-stone-100 font-mono text-xs rounded"
+                  onClick={() => {
+                    sendAction({ type: 'CONFIRM_MASS_ACTION' });
+                    setSelectedCardIds([]);
+                  }}
+                  className="w-full py-1.5 bg-emerald-900 hover:bg-emerald-800 border border-emerald-600 text-stone-100 font-mono text-xs rounded cursor-pointer"
                 >
                   Завершить Массовый Ход
                 </button>
               )}
 
-              <button
-                disabled={!isMyTurn}
-                onClick={handleDiscard}
-                className="w-full mt-2 py-1.5 bg-stone-900 hover:bg-stone-800 border border-stone-800 text-stone-300 font-mono text-xs rounded"
-              >
-                СБРОСИТЬ КАРТЫ
-              </button>
+              {!gameState.massActionState?.active && (
+                <button
+                  disabled={!isMyTurn}
+                  onClick={handleDiscard}
+                  className="w-full mt-2 py-1.5 bg-stone-900 hover:bg-stone-800 border border-stone-800 text-stone-300 font-mono text-xs rounded cursor-pointer"
+                >
+                  СБРОСИТЬ КАРТЫ
+                </button>
+              )}
             </div>
           )}
         </div>

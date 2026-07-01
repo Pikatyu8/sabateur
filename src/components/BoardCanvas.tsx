@@ -66,7 +66,7 @@ export default function BoardCanvas({
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
 
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
       setHasDragged(true);
     }
 
@@ -102,7 +102,7 @@ export default function BoardCanvas({
     const dx = touch.clientX - dragStart.current.x;
     const dy = touch.clientY - dragStart.current.y;
 
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
       setHasDragged(true);
     }
 
@@ -151,14 +151,15 @@ export default function BoardCanvas({
     ? (me.hand.find(c => c.id === selectedCardIds[0]) || null)
     : null;
 
-  // ОПТИМИЗАЦИЯ: Рассчитываем связи РОДНОЙ сетки ОДИН раз для всего рендера! [1]
+  const isDoubleCaveInActive = gameState.massActionState?.active && gameState.massActionState.type === 'double_cave_in';
+  const isDoubleMapActive = gameState.massActionState?.active && gameState.massActionState.type === 'double_map';
+
   const precalculatedReachable = React.useMemo(() => {
     return calculateReachability(gameState.grid);
   }, [gameState.grid]);
 
   const getTunnelPlacementResult = (x: number, y: number) => {
     if (!gameState || !selectedCard || selectedCard.type !== 'tunnel') return { valid: false };
-    // Передаем кэш достижимости для O(1) проверки
     return validateTunnelPlacement(gameState.grid, selectedCard, x, y, isRotated, precalculatedReachable);
   };
 
@@ -179,7 +180,7 @@ export default function BoardCanvas({
     >
       <div 
         className="flex flex-col gap-1.5 min-w-max p-2 select-none transition-transform duration-100 ease-out origin-top-left"
-        style={{ transform: `scale(${scale})` }}
+        style={{ transform: `scale(${scale})`, willChange: 'transform' }} // Добавлено willChange для аппаратного ускорения
       >
         {gridRows.map((row, yIdx) => (
           <div key={yIdx} className="flex gap-1.5 justify-center">
@@ -188,8 +189,10 @@ export default function BoardCanvas({
               const placed = gameState.grid[key];
 
               if (placed) {
-                const canCaveIn = selectedCardIds.length === 1 && selectedCard?.type === 'action' && selectedCard.actionType === 'cave_in' && !placed.isEntrance && !placed.isGoal;
-                const canMap = selectedCardIds.length === 1 && selectedCard?.type === 'action' && selectedCard.actionType === 'map' && placed.isGoal && !placed.flipped;
+                const canCaveIn = (selectedCardIds.length === 1 && selectedCard?.type === 'action' && selectedCard.actionType === 'cave_in' && !placed.isEntrance && !placed.isGoal)
+                  || (isDoubleCaveInActive && isMyTurn && !placed.isEntrance && !placed.isGoal);
+                const canMap = (selectedCardIds.length === 1 && selectedCard?.type === 'action' && selectedCard.actionType === 'map' && placed.isGoal && !placed.flipped)
+                  || (isDoubleMapActive && isMyTurn && placed.isGoal && !placed.flipped);
 
                 let borderHighlight = '';
                 if (canCaveIn) borderHighlight = 'ring-2 ring-red-500 animate-pulse scale-102 z-20';
@@ -207,13 +210,13 @@ export default function BoardCanvas({
                       if (canCaveIn) {
                         sendAction({
                           type: 'PLAY_ACTION',
-                          payload: { cardId: selectedCardIds[0], targetPlayerId: undefined, x, y }
+                          payload: { cardId: selectedCardIds[0] || '', targetPlayerId: undefined, x, y }
                         });
                         setSelectedCardIds([]);
                       } else if (canMap) {
                         sendAction({
                           type: 'PLAY_ACTION',
-                          payload: { cardId: selectedCardIds[0], targetPlayerId: undefined, x, y }
+                          payload: { cardId: selectedCardIds[0] || '', targetPlayerId: undefined, x, y }
                         });
                         setSelectedCardIds([]);
                       }

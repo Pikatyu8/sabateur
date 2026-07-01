@@ -167,7 +167,7 @@ export const createActionDeck = (): ActionCard[] => {
     });
   }
 
-  // Крестики-нолики на 15 секунд (1 шт)
+  // --- КРЕСТИКИ-НОЛИКИ ---
   cards.push({
     id: `action_ttt_15_${idCounter++}`,
     type: 'action',
@@ -177,7 +177,6 @@ export const createActionDeck = (): ActionCard[] => {
     tttDuration: 15,
   });
 
-  // Крестики-нолики на 30 секунд (1 шт)
   cards.push({
     id: `action_ttt_30_${idCounter++}`,
     type: 'action',
@@ -352,7 +351,8 @@ export const validateTunnelPlacement = (
   card: TunnelCard,
   x: number,
   y: number,
-  rotated: boolean
+  rotated: boolean,
+  precalculatedReachable?: Set<string> // Кэш связей для О(1) проверки
 ): { valid: boolean; reason?: string } => {
   const key = `${x},${y}`;
   if (grid[key]) return { valid: false, reason: 'Здесь уже есть карта' };
@@ -370,6 +370,7 @@ export const validateTunnelPlacement = (
 
   let hasNeighbor = false;
   let matchesAllNeighbors = true;
+  let isReachableFromReachedNeighbor = false;
 
   for (const { dir, nx, ny } of neighbors) {
     const neighborKey = `${nx},${ny}`;
@@ -377,7 +378,10 @@ export const validateTunnelPlacement = (
 
     if (neighbor) {
       hasNeighbor = true;
-      if (!neighbor.isGoal) {
+      
+      // Изменено: Мы сопоставляем выходы и разрешаем прокладывать путь от целей, 
+      // только если они раскрыты (neighbor.flipped === true) или не являются картой цели вообще (!neighbor.isGoal)
+      if (!neighbor.isGoal || neighbor.flipped) {
         const neighborInfo = getRotatedExitsAndConnections(neighbor);
         const opposing = getOpposingDir(dir);
 
@@ -388,6 +392,11 @@ export const validateTunnelPlacement = (
           matchesAllNeighbors = false;
           break;
         }
+
+        // Оптимизация: Проверяем, есть ли контакт со смежным блоком, который УЖЕ соединен с входом
+        if (precalculatedReachable && precalculatedReachable.has(neighborKey) && myExit && neighborExit) {
+          isReachableFromReachedNeighbor = true;
+        }
       }
     }
   }
@@ -395,11 +404,18 @@ export const validateTunnelPlacement = (
   if (!hasNeighbor) return { valid: false, reason: 'Карта должна примыкать к существующему туннелю' };
   if (!matchesAllNeighbors) return { valid: false, reason: 'Туннели на стыке карт не совпадают' };
 
-  const tempGrid = { ...grid, [key]: tempPlaced };
-  const reached = calculateReachability(tempGrid);
+  if (precalculatedReachable) {
+    if (!isReachableFromReachedNeighbor) {
+      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    }
+  } else {
+    // Резервный расчет на случай отсутствия переданного кэша (например, при валидации на сервере)
+    const tempGrid = { ...grid, [key]: tempPlaced };
+    const reached = calculateReachability(tempGrid);
 
-  if (!reached.has(key)) {
-    return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    if (!reached.has(key)) {
+      return { valid: false, reason: 'Карта должна образовывать непрерывный туннель от входа' };
+    }
   }
 
   return { valid: true };

@@ -1,5 +1,4 @@
 // src/components/Sidebar.tsx
-// src/components/Sidebar.tsx
 import React, { useRef, useEffect } from 'react';
 import { Users, Coins, ShieldAlert, MessageSquare, Send, List } from 'lucide-react';
 import { GameState, NetworkAction } from '../types';
@@ -25,7 +24,7 @@ export default function Sidebar({
 
   useEffect(() => {
     if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      logsEndRef.current.scrollIntoView({ behavior: 'auto' });
     }
   }, [gameState.logs, activeTab]);
 

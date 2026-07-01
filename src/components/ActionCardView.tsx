@@ -24,7 +24,7 @@ export const ActionCardView: React.FC<ActionCardViewProps> = ({
 
   const wrapCard = (bg: string, label: string, icon: React.ReactNode, sub: string) => (
     <div
-      className={`relative w-16 h-24 rounded-lg bg-gradient-to-br ${bg} border p-1 select-none flex flex-col justify-between items-center transition-all cursor-pointer ${selectClass}`}
+      className={`relative w-16 h-24 rounded-lg bg-gradient-to-br ${bg} border p-1 select-none flex flex-col justify-between items-center transition-[transform,shadow] duration-200 cursor-pointer ${selectClass}`}
       onClick={onClick}
     >
       <span className="text-[8px] font-bold uppercase tracking-widest text-center">{label}</span>
@@ -66,7 +66,7 @@ export const ActionCardView: React.FC<ActionCardViewProps> = ({
   }
 
   return (
-    <div className={`relative w-16 h-24 rounded-lg bg-stone-800 border flex items-center justify-center cursor-pointer ${selectClass}`} onClick={onClick}>
+    <div className={`relative w-16 h-24 rounded-lg bg-stone-800 border flex items-center justify-center cursor-pointer transition-[transform,shadow] duration-200 ${selectClass}`} onClick={onClick}>
       <HelpCircle className="w-8 h-8 text-stone-500" />
     </div>
   );

@@ -26,12 +26,13 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
   onClick,
   preview = false,
 }) => {
-  const baseClass = `relative w-16 h-24 rounded-lg flex flex-col justify-between p-1 select-none overflow-hidden transition-all duration-200 cursor-pointer text-xs
+  // Оптимизация: Заменен transition-all на точечные переходы трансформации и теней
+  const baseClass = `relative w-16 h-24 rounded-lg flex flex-col justify-between p-1 select-none overflow-hidden transition-[transform,shadow] duration-200 cursor-pointer text-xs
     ${preview ? 'opacity-60 border-2 border-dashed border-emerald-400 bg-stone-800/80' : ''}
     ${isSelected ? 'scale-105 ring-2 ring-amber-400 shadow-lg shadow-amber-400/30' : 'hover:scale-[1.02] shadow-md'}
   `;
 
-  // 1. Закрытая карта цели (с тонкими полупрозрачными проходами для наглядности стыков)
+  // 1. Закрытая карта цели (Оптимизация: Удален тяжелый backdrop-blur, заменен на bg-stone-950/90)
   if (isGoal && !flipped && card.id === 'goal_hidden') {
     return (
       <div
@@ -45,7 +46,7 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         <div className="absolute right-0 top-[calc(50%-5px)] h-2.5 w-1/2 bg-amber-900/10 border-y border-amber-950/20" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-amber-950/20 border border-amber-900/20" />
 
-        <div className="absolute inset-1 rounded border border-amber-900/25 flex flex-col items-center justify-center gap-1 bg-stone-950/10 backdrop-blur-[0.5px] z-10">
+        <div className="absolute inset-1 rounded border border-amber-900/25 flex flex-col items-center justify-center gap-1 bg-stone-950/90 z-10">
           <HelpCircle className="w-5 h-5 text-amber-700/80 animate-pulse" />
           <span className="font-mono text-[9px] text-amber-700/70 uppercase tracking-widest font-bold">Цель</span>
         </div>
@@ -53,7 +54,7 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
     );
   }
 
-  // 2. Раскрытая золотая жила (видна игроку через карту, но не перевернута для остальных)
+  // 2. Раскрытая золотая жила
   if (isGoal && (flipped || card.id !== 'goal_hidden') && isGold) {
     return (
       <div
@@ -61,14 +62,12 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         className={`${baseClass} bg-gradient-to-br from-stone-900 via-stone-800 to-stone-950 border border-yellow-500/50 text-stone-300 shadow-xl shadow-yellow-500/10`}
         onClick={onClick}
       >
-        {/* Полноценные золотые туннели на заднем плане */}
         <div className="absolute top-0 left-[calc(50%-6px)] w-3 h-1/2 bg-amber-500/35 border-x border-amber-600/30" />
         <div className="absolute bottom-0 left-[calc(50%-6px)] w-3 h-1/2 bg-amber-500/35 border-x border-amber-600/30" />
         <div className="absolute left-0 top-[calc(50%-6px)] h-3 w-1/2 bg-amber-500/35 border-y border-amber-600/30" />
         <div className="absolute right-0 top-[calc(50%-6px)] h-3 w-1/2 bg-amber-500/35 border-y border-amber-600/30" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-500/40 border border-amber-600/40" />
 
-        {/* Центральные монеты с обводкой */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-yellow-950/95 border-2 border-yellow-400 flex flex-col items-center justify-center shadow-lg shadow-yellow-500/20 z-10">
           <Coins className="w-5 h-5 text-yellow-400 animate-bounce" />
         </div>
@@ -86,7 +85,7 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
     );
   }
 
-  // 3. Раскрытый обычный камень (виден только игроку через карту)
+  // 3. Раскрытый обычный камень
   if (isGoal && (flipped || card.id !== 'goal_hidden') && !isGold) {
     return (
       <div
@@ -94,14 +93,12 @@ export const TunnelCardView: React.FC<TunnelCardViewProps> = ({
         className={`${baseClass} bg-gradient-to-br from-stone-900 via-stone-800 to-stone-950 border border-stone-600/50 text-stone-400`}
         onClick={onClick}
       >
-        {/* Каменные туннели на заднем плане */}
         <div className="absolute top-0 left-[calc(50%-6px)] w-3 h-1/2 bg-stone-700/30 border-x border-stone-800/30" />
         <div className="absolute bottom-0 left-[calc(50%-6px)] w-3 h-1/2 bg-stone-700/30 border-x border-stone-800/30" />
         <div className="absolute left-0 top-[calc(50%-6px)] h-3 w-1/2 bg-stone-700/30 border-y border-stone-800/30" />
         <div className="absolute right-0 top-[calc(50%-6px)] h-3 w-1/2 bg-stone-700/30 border-y border-stone-800/30" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-stone-700/40 border border-stone-800/40" />
 
-        {/* Глыба в центре */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-stone-950/95 border-2 border-stone-500 flex flex-col items-center justify-center shadow-md z-10">
           <Layers className="w-5 h-5 text-stone-400" />
         </div>
